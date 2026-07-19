@@ -65,7 +65,9 @@ CREATE TABLE IF NOT EXISTS claims (
     fact_checker TEXT,                   -- Correctiv / dpa / AFP (mock entries)
     url TEXT,
     narrative_code TEXT,
-    published_at TEXT
+    published_at TEXT,
+    snapshot_json TEXT,                  -- full local copy of the source record (APIs disappear; our copies don't)
+    source TEXT                          -- mock | google_factcheck
 );
 
 CREATE TABLE IF NOT EXISTS claim_matches (

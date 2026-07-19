@@ -1,0 +1,59 @@
+{
+  "claims": [
+    {
+      "text": "Bei der Briefwahl können Stimmzettel massenhaft gefälscht werden, ohne dass es auffällt",
+      "claimant": "Social-Media-Posts",
+      "claimDate": "2026-06-20T00:00:00Z",
+      "claimReview": [
+        {
+          "publisher": {
+            "name": "CORRECTIV",
+            "site": "correctiv.org"
+          },
+          "url": "https://correctiv.org/faktencheck/2026/07/01/briefwahl-faelschung-behauptung",
+          "title": "Nein, Briefwahl-Stimmzettel können nicht unbemerkt massenhaft gefälscht werden",
+          "reviewDate": "2026-07-01T00:00:00Z",
+          "textualRating": "Falsch",
+          "languageCode": "de"
+        }
+      ]
+    },
+    {
+      "text": "Asylbewerber erhalten in Deutschland mehr Geld vom Staat als Rentner",
+      "claimant": "Facebook-Beitrag",
+      "claimDate": "2026-05-10T00:00:00Z",
+      "claimReview": [
+        {
+          "publisher": {
+            "name": "dpa-Faktencheck",
+            "site": "dpa-factchecking.com"
+          },
+          "url": "https://dpa-factchecking.com/germany/2026/asylbewerber-rentner-vergleich",
+          "title": "Vergleich von Asylbewerberleistungen und Renten lässt entscheidende Fakten weg",
+          "reviewDate": "2026-05-18T00:00:00Z",
+          "textualRating": "Fehlender Kontext",
+          "languageCode": "de"
+        }
+      ]
+    },
+    {
+      "text": "Windräder trocknen die Böden aus und sind für die Dürre in Deutschland verantwortlich",
+      "claimant": "TikTok-Video",
+      "claimDate": "2026-06-28T00:00:00Z",
+      "claimReview": [
+        {
+          "publisher": {
+            "name": "AFP Faktencheck",
+            "site": "faktencheck.afp.com"
+          },
+          "url": "https://faktencheck.afp.com/doc.afp.com.2026-windraeder-duerre",
+          "title": "Windräder verursachen keine Dürren — was Fachleute sagen",
+          "reviewDate": "2026-07-05T00:00:00Z",
+          "textualRating": "Irreführend",
+          "languageCode": "de"
+        }
+      ]
+    }
+  ],
+  "nextPageToken": ""
+}
