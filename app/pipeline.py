@@ -15,8 +15,9 @@ from . import config, connectors, db, llm
 
 def _store(con, item_id: int, stage: str, output: dict) -> None:
     con.execute(
-        "INSERT OR REPLACE INTO enrichments (item_id, stage, output_json, model, created_at) "
-        "VALUES (?,?,?,?,?)",
+        db.sql_upsert(
+            "INTO enrichments (item_id, stage, output_json, model, created_at) VALUES (?,?,?,?,?)",
+            conflict="item_id, stage", update_cols=("output_json", "model", "created_at")),
         (item_id, stage, json.dumps(output, ensure_ascii=False), llm.mode(), db.now()),
     )
 
@@ -54,7 +55,9 @@ def run_pipeline(con) -> dict:
         if best:
             claim, sim = best
             con.execute(
-                "INSERT OR REPLACE INTO claim_matches (item_id, claim_id, similarity) VALUES (?,?,?)",
+                db.sql_upsert(
+                    "INTO claim_matches (item_id, claim_id, similarity) VALUES (?,?,?)",
+                    conflict="item_id, claim_id", update_cols=("similarity",)),
                 (item["id"], claim["id"], sim),
             )
             _store(con, item["id"], "claim_match",
@@ -67,12 +70,13 @@ def run_pipeline(con) -> dict:
 
         # ---- Stage 6: opportunity -------------------------------------------
         if score >= config.SCORE_THRESHOLD:
+            expiry_sql, expiry_param = db.sql_expiry(config.OPPORTUNITY_EXPIRY_HOURS)
             con.execute(
-                "INSERT OR IGNORE INTO opportunities "
-                "(item_id, kind, score, score_breakdown, status, expires_at) "
-                "VALUES (?,?,?,?, 'open', datetime('now', ?))",
-                (item["id"], "reply", score, json.dumps(breakdown),
-                 f"+{config.OPPORTUNITY_EXPIRY_HOURS} hours"),
+                db.sql_insert_ignore(
+                    "INTO opportunities "
+                    "(item_id, kind, score, score_breakdown, status, expires_at) "
+                    f"VALUES (?,?,?,?, 'open', {expiry_sql})"),
+                (item["id"], "reply", score, json.dumps(breakdown), expiry_param),
             )
             log["opportunities"] += 1
 
@@ -122,14 +126,18 @@ def seed_reference_data(con) -> None:
     """Load narratives + fact-check corpus (idempotent)."""
     for n in connectors.load_narratives():
         con.execute(
-            "INSERT OR IGNORE INTO narratives (code, label_de, label_en, description_en) VALUES (?,?,?,?)",
+            db.sql_insert_ignore("INTO narratives (code, label_de, label_en, description_en) VALUES (?,?,?,?)"),
             (n["code"], n["label_de"], n["label_en"], n["description_en"]),
         )
     for c in connectors.load_factchecks():
         con.execute(
-            "INSERT OR IGNORE INTO claims (id, claim_de, claim_en, verdict, fact_checker, url, narrative_code, published_at, source) "
-            "VALUES (?,?,?,?,?,?,?,?,'mock')",
+            db.sql_insert_ignore(
+                "INTO claims (id, claim_de, claim_en, verdict, fact_checker, url, narrative_code, published_at, source) "
+                "VALUES (?,?,?,?,?,?,?,?,'mock')"),
             (c["id"], c["claim_de"], c["claim_en"], c["verdict"],
              c["fact_checker"], c["url"], c["narrative_code"], c["published_at"]),
         )
+    # The mock claims above carry explicit ids; on Postgres the identity
+    # sequence must be moved past them (no-op on sqlite).
+    db.resync_identity(con, "claims")
     con.commit()

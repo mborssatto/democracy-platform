@@ -65,10 +65,11 @@ def ingest(source: str):
         pseudo_id = pseudo.pseudonymize(item["real_author_id"])
         pseudo.store_mapping(con, item["real_author_id"], pseudo_id)
         cur = con.execute(
-            "INSERT OR IGNORE INTO content_items "
-            "(platform, platform_item_id, author_pseudo, author_followers_band, text, text_en, "
-            " url, posted_at, ingested_at, views, views_prev, likes, comments, shares) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            db.sql_insert_ignore(
+                "INTO content_items "
+                "(platform, platform_item_id, author_pseudo, author_followers_band, text, text_en, "
+                " url, posted_at, ingested_at, views, views_prev, likes, comments, shares) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)"),
             (item["platform"], item["platform_item_id"], pseudo_id, item["followers_band"],
              item["text"], item["text_en"], item["url"], item["posted_at"], db.now(),
              item["views"], item["views_prev"], item["likes"], item["comments"], item["shares"]),
@@ -116,9 +117,12 @@ def sync_factchecks():
 @app.post("/api/pipeline/run")
 def pipeline_run():
     con = db.connect()
-    pending = con.execute("SELECT COUNT(*) c FROM content_items WHERE status='pending'").fetchone()["c"]
-    log = pipeline.run_pipeline(con)
-    con.close()
+    try:
+        pending = con.execute("SELECT COUNT(*) c FROM content_items WHERE status='pending'").fetchone()["c"]
+        log = pipeline.run_pipeline(con)
+    finally:
+        # Always release the connection — a leaked one holds locks on Postgres.
+        con.close()
     log["pending_before"] = pending
     if pending == 0:
         log["note"] = "Nothing new to process — ingest data first (or submit a tip)."
@@ -132,10 +136,10 @@ def radar():
     narratives = []
     for n in con.execute("SELECT * FROM narratives").fetchall():
         rows = con.execute(
-            """SELECT ci.*, e.output_json score_json FROM content_items ci
+            f"""SELECT ci.*, e.output_json score_json FROM content_items ci
                JOIN enrichments ec ON ec.item_id=ci.id AND ec.stage='classify'
                LEFT JOIN enrichments e ON e.item_id=ci.id AND e.stage='score'
-               WHERE json_extract(ec.output_json,'$.narrative')=?
+               WHERE {db.sql_json_extract('ec.output_json', 'narrative')}=?
                ORDER BY ci.views DESC""", (n["code"],)).fetchall()
         if not rows:
             continue
@@ -197,6 +201,7 @@ def create_draft(opp_id: int):
            LEFT JOIN claim_matches cm ON cm.item_id=ci.id
            LEFT JOIN claims cl ON cl.id=cm.claim_id WHERE o.id=?""", (opp_id,)).fetchone()
     if not row:
+        con.close()
         raise HTTPException(404, "opportunity not found")
     fc = {"fact_checker": row["fact_checker"], "verdict": row["verdict"], "url": row["url"]} \
         if row["fact_checker"] else None
@@ -222,6 +227,7 @@ def update_draft(draft_id: int, body: DraftUpdate):
     con = db.connect()
     d = con.execute("SELECT * FROM drafts WHERE id=?", (draft_id,)).fetchone()
     if not d:
+        con.close()
         raise HTTPException(404, "draft not found")
 
     dist = gates.token_edit_distance_pct(d["ai_seed"], body.text)
@@ -236,7 +242,7 @@ def update_draft(draft_id: int, body: DraftUpdate):
     copy_ok, copy_msg = gates.copypasta_check(body.text, recent)
     dwell_ok, dwell_msg = gates.dwell_check(d["created_at"])
     posted_today = con.execute(
-        "SELECT COUNT(*) c FROM posted_actions WHERE date(posted_at)=date('now')").fetchone()["c"]
+        f"SELECT COUNT(*) c FROM posted_actions WHERE {db.sql_is_today('posted_at')}").fetchone()["c"]
     rate_ok, rate_msg = gates.rate_cap_check(posted_today)
 
     checks = [
@@ -274,10 +280,12 @@ def mark_posted(draft_id: int, body: PostedIn):
     con = db.connect()
     d = con.execute("SELECT * FROM drafts WHERE id=?", (draft_id,)).fetchone()
     if not d:
+        con.close()
         raise HTTPException(404, "draft not found")
     if d["status"] != "post_ready":
+        con.close()
         raise HTTPException(409, "draft has not passed all gates")
-    con.execute("INSERT OR IGNORE INTO posted_actions (draft_id, posted_url, posted_at) VALUES (?,?,?)",
+    con.execute(db.sql_insert_ignore("INTO posted_actions (draft_id, posted_url, posted_at) VALUES (?,?,?)"),
                 (draft_id, body.posted_url, db.now()))
     con.execute("UPDATE drafts SET status='posted' WHERE id=?", (draft_id,))
     con.execute("UPDATE opportunities SET status='posted' "
@@ -293,13 +301,14 @@ def make_brief(narrative_code: str):
     con = db.connect()
     n = con.execute("SELECT * FROM narratives WHERE code=?", (narrative_code,)).fetchone()
     if not n:
+        con.close()
         raise HTTPException(404, "unknown narrative")
     claims = [dict(c) for c in con.execute(
         "SELECT * FROM claims WHERE narrative_code=?", (narrative_code,)).fetchall()]
     examples = [r["text"] for r in con.execute(
-        """SELECT ci.text FROM content_items ci
+        f"""SELECT ci.text FROM content_items ci
            JOIN enrichments e ON e.item_id=ci.id AND e.stage='classify'
-           WHERE json_extract(e.output_json,'$.narrative')=? LIMIT 3""",
+           WHERE {db.sql_json_extract('e.output_json', 'narrative')}=? LIMIT 3""",
         (narrative_code,)).fetchall()]
     brief = llm.draft_brief(dict(n), claims, examples)
     db.audit(con, "demo-user", "brief_generated", {"narrative": narrative_code})

@@ -1,23 +1,60 @@
 # Integration: Supabase (production database)
 
-**Status in prototype: 🟡 SUBSTITUTED** — SQLite stands in for Supabase Postgres
-so the prototype needs zero accounts. The schema in `app/db.py` mirrors the plan's
-core tables on purpose.
+**Status in prototype: 🟢 IMPLEMENTED (DB_BACKEND=postgres)** — `app/db.py` is
+backend-switchable. SQLite stays the zero-setup default for local dev; setting
+two environment variables runs the whole platform on Postgres. Supabase is
+hosted Postgres, so "swapping to Supabase" is just pasting their connection
+string — no code changes.
 
-## Step-by-step: swapping to Supabase
+## How to switch
 
-1. Create a project at https://supabase.com/ (choose the **Frankfurt (EU)** region —
-   data-protection requirement).
-2. Install the CLI (https://supabase.com/docs/guides/local-development) and convert
-   `app/db.py`'s SCHEMA string into a migration file (`supabase migration new init`,
-   paste, adjust types: SQLite `INTEGER PRIMARY KEY` → `bigint generated always as identity`).
-3. Replace the `sqlite3` connection in `app/db.py` with Postgres via `psycopg`
-   (connection string from the Supabase dashboard). The queries are plain SQL and
-   already compatible except `json_extract(...)` → `->>` operator (three call sites).
-4. What Supabase adds beyond the database: Auth (login for volunteers/staff),
-   Row Level Security (per-tier access rules from the full plan), Realtime
-   (live Radar updates), Storage (Studio media), pgvector (real embeddings for
-   claim matching instead of the word-overlap stand-in).
+```bash
+# .env (or the environment)
+DB_BACKEND=postgres
+DATABASE_URL=postgres://postgres:dev@localhost:54329/democracy
+```
+
+- `DB_BACKEND` — `sqlite` (default) or `postgres`.
+- `DATABASE_URL` — any Postgres connection string. For Supabase: project
+  dashboard → Connect → connection string (choose the **Frankfurt (EU)**
+  region when creating the project — data-protection requirement).
+
+Tables are created automatically on startup from `migrations/001_init.sql`
+(idempotent, `CREATE TABLE IF NOT EXISTS`). The same file works as a Supabase
+CLI migration (`supabase migration new init`, paste it in).
+
+## How it works (app/db.py)
+
+- `connect()` returns a connection with the SAME usage on both backends:
+  `con.execute(sql, params)` with `?` placeholders, rows indexable by column
+  name, `con.commit()`, `con.close()`. On Postgres a ~40-line adapter
+  (`PgConnection`) translates `?` → `%s`, uses psycopg's `dict_row`, and
+  exposes `lastrowid` via `SELECT lastval()`.
+- The few dialect differences are isolated in `db.sql_*` helpers:
+  `INSERT OR IGNORE` → `ON CONFLICT DO NOTHING`, `INSERT OR REPLACE` →
+  `ON CONFLICT ... DO UPDATE`, `json_extract(col,'$.k')` → `(col)::jsonb->>'k'`,
+  `datetime('now', '+N hours')` → `now() + make_interval(...)`,
+  `date(col)=date('now')` → `(col)::timestamp::date = current_date`.
+
+## Testing against Postgres
+
+`tests/test_postgres.py` runs the full pipeline (including the
+pseudonymization canary) against `DATABASE_URL` and **skips cleanly when no
+server is reachable**. A disposable local server:
+
+```bash
+docker run -d --name dp-postgres -p 54329:5432 \
+  -e POSTGRES_PASSWORD=dev -e POSTGRES_DB=democracy postgres:16-alpine
+# the whole suite on Postgres:
+DB_BACKEND=postgres python -m pytest tests/ -q
+```
+
+## What Supabase adds beyond the database
+
+Auth (login for volunteers/staff), Row Level Security (per-tier access rules
+from the full plan), Realtime (live Radar updates), Storage (Studio media),
+pgvector (real embeddings for claim matching instead of the word-overlap
+stand-in).
 
 ## Learn more
 - Supabase in 100 seconds: https://www.youtube.com/watch?v=zBZgdTb-dns

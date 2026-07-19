@@ -20,10 +20,8 @@ FIXTURE = json.loads(
 
 
 @pytest.fixture()
-def con(tmp_path, monkeypatch):
-    monkeypatch.setattr(db, "DB_PATH", tmp_path / "test.db")
+def con(fresh_db, monkeypatch):
     monkeypatch.delenv("FACTCHECK_API_KEY", raising=False)
-    db.init_db()
     con = db.connect()
     pipeline.seed_reference_data(con)
     yield con
@@ -105,10 +103,8 @@ def test_normalize_verdict():
 
 # ------------------------------------------------------------------ endpoint
 @pytest.fixture()
-def client(tmp_path, monkeypatch):
-    monkeypatch.setattr(db, "DB_PATH", tmp_path / "test.db")
+def client(fresh_db, monkeypatch):
     monkeypatch.delenv("FACTCHECK_API_KEY", raising=False)
-    db.init_db()
     con = db.connect()
     pipeline.seed_reference_data(con)
     con.close()

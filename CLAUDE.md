@@ -31,8 +31,9 @@ No build step: the frontend is a single Vue page (`frontend/index.html`, vendore
   never leak into main tables — keep it passing.
 - `app/connectors.py` — data sources. Each mock reads `mock_data/*.json` shaped exactly
   like the real API; `docs/integrations/*.md` has the step-by-step to make each real.
-- `app/db.py` — SQLite schema, mirrors the production (Supabase/Postgres) tables on
-  purpose. Swap guide: `docs/integrations/supabase.md`.
+- `app/db.py` — backend-switchable database layer: SQLite by default (zero setup),
+  Postgres/Supabase via `DB_BACKEND=postgres` + `DATABASE_URL` (schema in
+  `migrations/001_init.sql`). Details: `docs/integrations/supabase.md`.
 
 ## Hard rules (architecture, not preference — never "improve" these away)
 
