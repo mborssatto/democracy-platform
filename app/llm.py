@@ -76,6 +76,11 @@ def _real_json(system: str, user: str) -> dict:
 # ------------------------------------------------------------------- functions
 # Each function: same signature and return shape in mock and real mode.
 
+# Bump this whenever a prompt (or the mock heuristic standing in for it) changes.
+# The eval runner (evals/run_evals.py) stamps every score report with it, so we
+# always know which prompt version produced which numbers.
+PROMPT_VERSION = "v1"
+
 NARRATIVE_KEYWORDS = {
     "briefwahl_betrug": ["briefwahl", "wahlbetrug", "gefälscht", "stimmzettel", "wahlfälschung"],
     "sozialleistungen_migranten": ["migranten", "sozialleistungen", "bürgergeld", "rentner", "asyl"],
