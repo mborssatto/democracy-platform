@@ -1,7 +1,24 @@
 # Integration: TikTok Research API
 
-**Status in prototype: 🟡 MOCKED** — `app/connectors.py → fetch_tiktok()` reads
-`mock_data/tiktok_videos.json`, which has the exact shape of a real Research API response.
+**Status in prototype: 🟢 CODE READY (flag off — waiting on Research API approval)** —
+the real client lives in `app/tiktok_client.py` and switches on automatically when
+both `TIKTOK_CLIENT_KEY` and `TIKTOK_CLIENT_SECRET` are set in `.env` (they arrive
+with TikTok's approval, step 1 below). Until then `app/connectors.py → fetch_tiktok()`
+keeps reading `mock_data/tiktok_videos.json`, which has the exact shape of a real
+Research API response. The request/response mapping is proven offline by
+`tests/test_tiktok.py` against the recorded fixture `mock_data/tiktok_api_response.json`.
+
+## Enabling it (once approved)
+
+Add to `.env` (see `.env.example`):
+
+```
+TIKTOK_CLIENT_KEY=aw...      # from the developer portal, after approval
+TIKTOK_CLIENT_SECRET=...
+```
+
+No code change needed — `fetch_tiktok()` detects the credentials and calls the real API
+(token cached ~110 min; queries paginated up to 3 pages of 100 videos).
 
 ## What it gives us
 Search public TikTok videos by keyword/hashtag/region/date, plus comments and public
@@ -33,9 +50,11 @@ account info. Free for approved EU non-profit research organizations.
      "start_date": "20260701", "end_date": "20260715", "max_count": 100
    }
    ```
-5. **Wire it in**: replace the `_load(...)` call in `fetch_tiktok()` with the HTTP calls
-   above (use `httpx`, already a dependency). Map response fields exactly as the mock
-   already does. Keep `followers_band` derived from follower_count (never store the exact number).
+5. **Wire it in**: ✅ done — `app/tiktok_client.py` implements steps 3–4 (token caching,
+   query pagination, field mapping identical to the mock). Setting the two env vars is
+   the only remaining step. Note: the video query returns no follower counts, so
+   `followers_band` stays `"unknown"` until an account-info sync is added (we never
+   store exact counts either way).
 6. **Respect the limits**: 1,000 requests/day documented ceiling; content searchable
    ~48h after posting; sync deletions (if a video is gone, delete our copy — the
    prototype's weekly deletion-sync job in the full plan).
