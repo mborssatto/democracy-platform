@@ -6,11 +6,17 @@ order, just asynchronous). Each stage writes one row to `enrichments`
 (UNIQUE(item_id, stage) = idempotency: re-running never duplicates work).
 """
 import json
+import math
 
 from . import config, connectors, db, llm
 
 # Thresholds (amplification floor, score threshold, opportunity expiry) live in
 # app/config.py — env-overridable, read at call time as config.NAME.
+
+# Claim-match thresholds on the combined score (similarity + narrative prior).
+# Embedding cosine and word overlap live on different scales, hence two numbers.
+WORD_OVERLAP_THRESHOLD = 0.4
+EMBED_MATCH_THRESHOLD = 0.35
 
 
 def _store(con, item_id: int, stage: str, output: dict) -> None:
@@ -30,6 +36,16 @@ def run_pipeline(con) -> dict:
     items = con.execute("SELECT * FROM content_items WHERE status='pending'").fetchall()
     claims = con.execute("SELECT * FROM claims").fetchall()
 
+    # Real embeddings when a key is configured (None in mock mode → word-overlap
+    # fallback below). Claim vectors are cached; item texts are embedded in ONE
+    # batch call up front (cost discipline: never one API call per item).
+    embed_model = llm.embedding_model()
+    claim_vectors = ensure_claim_embeddings(con, claims)
+    item_vectors = {}
+    if claim_vectors is not None and items:
+        vecs = llm.embed_texts([it["text"] for it in items])  # post text only (hard rule 5)
+        item_vectors = {it["id"]: v for it, v in zip(items, vecs)}
+
     for item in items:
         # ---- Stage 1: triage (+ translation) --------------------------------
         verdict = llm.triage(item["text"])
@@ -48,10 +64,19 @@ def run_pipeline(con) -> dict:
         _store(con, item["id"], "classify", cls)
         log["classified"] += 1
 
-        # ---- Stage 3+4: embed & claim-match ---------------------------------
-        # Prototype: word-overlap similarity stands in for embedding search
-        # (plan: pgvector cosine over real embeddings — same idea, better math).
-        best = _match_claim(item["text"], cls["narrative"], claims)
+        # ---- Stage 3: embed --------------------------------------------------
+        # Real vectors when an embedding key is set; in mock mode word overlap
+        # stands in and this stage records that honestly. Item vectors stay in
+        # memory for this run — only claim vectors are cached (stable corpus).
+        vec = item_vectors.get(item["id"])
+        _store(con, item["id"], "embed",
+               {"model": embed_model or "mock-standin", "dim": len(vec) if vec else 0})
+
+        # ---- Stage 4: claim-match --------------------------------------------
+        # Embedding cosine when vectors exist, word-overlap fallback otherwise
+        # (plan: pgvector on Postgres when the corpus outgrows in-memory cosine).
+        best = _match_claim(item["text"], cls["narrative"], claims,
+                            item_vector=vec, claim_vectors=claim_vectors)
         if best:
             claim, sim = best
             con.execute(
@@ -87,16 +112,72 @@ def run_pipeline(con) -> dict:
     return log
 
 
-def _match_claim(text: str, narrative: str, claims) -> tuple | None:
+def cosine(a: list[float], b: list[float]) -> float:
+    """Cosine similarity in plain Python — honest at this corpus size (dozens
+    of claims); pgvector is the documented scale path (docs/integrations/llm.md)."""
+    dot = sum(x * y for x, y in zip(a, b))
+    norm = math.sqrt(sum(x * x for x in a)) * math.sqrt(sum(y * y for y in b))
+    return dot / norm if norm else 0.0
+
+
+def ensure_claim_embeddings(con, claims, transport=None) -> dict | None:
+    """Load cached claim vectors for the active model; embed + cache any missing
+    ones in ONE batch call. Returns {claim_id: vector} or None in mock mode.
+
+    `transport` is passed through to llm.embed_texts for tests (no network).
+    """
+    model = llm.embedding_model()
+    if model is None:
+        return None
+    vectors, missing = {}, []
+    for c in claims:
+        row = con.execute(
+            "SELECT vector_json FROM claim_embeddings WHERE claim_id=? AND model=?",
+            (c["id"], model)).fetchone()
+        if row:
+            vectors[c["id"]] = json.loads(row["vector_json"])
+        else:
+            missing.append(c)
+    if missing:
+        # Claim text only — no author data exists on claims (hard rule 5 holds).
+        vecs = llm.embed_texts([c["claim_de"] or c["claim_en"] or "" for c in missing],
+                               transport=transport)
+        for c, vec in zip(missing, vecs):
+            vectors[c["id"]] = vec
+            con.execute(
+                db.sql_upsert(
+                    "INTO claim_embeddings (claim_id, model, vector_json, created_at) VALUES (?,?,?,?)",
+                    conflict="claim_id", update_cols=("model", "vector_json", "created_at")),
+                (c["id"], model, json.dumps(vec), db.now()),
+            )
+        con.commit()
+    return vectors
+
+
+def _match_claim(text: str, narrative: str, claims,
+                 item_vector=None, claim_vectors=None) -> tuple | None:
     """Match post text against the fact-check corpus. Narrative match is a strong
-    prior; word overlap breaks ties. Returns (claim_row, similarity) or None."""
+    prior (+0.4) on both paths. Returns (claim_row, similarity) or None.
+
+    Embeddings path when vectors are provided (real mode): cosine similarity.
+    Fallback (mock mode / no embedding key): word overlap — unchanged behavior."""
+    if item_vector is not None and claim_vectors:
+        best, best_sim = None, 0.0
+        for c in claims:
+            vec = claim_vectors.get(c["id"])
+            if vec is None:
+                continue
+            sim = cosine(item_vector, vec) + (0.4 if c["narrative_code"] == narrative else 0.0)
+            if sim > best_sim and sim >= EMBED_MATCH_THRESHOLD:
+                best, best_sim = c, round(min(sim, 0.99), 2)
+        return (best, best_sim) if best else None
     text_words = set(text.lower().split())
     best, best_sim = None, 0.0
     for c in claims:
         claim_words = set((c["claim_de"] or "").lower().split())
         overlap = len(text_words & claim_words) / max(1, len(claim_words))
         sim = overlap + (0.4 if c["narrative_code"] == narrative else 0.0)
-        if sim > best_sim and sim >= 0.4:
+        if sim > best_sim and sim >= WORD_OVERLAP_THRESHOLD:
             best, best_sim = c, round(min(sim, 0.99), 2)
     return (best, best_sim) if best else None
 
