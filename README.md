@@ -69,15 +69,15 @@ EN/DE translation layer.
 with retry/backoff and a dead-letter view in the UI. The "Run pipeline" button
 remains as a synchronous drain of the same queue.
 
-**Faked, honestly:** platform data (fixtures), embeddings (word overlap instead of
-<<<<<<< HEAD
-vectors), the job queue (synchronous button instead of workers), auth (local session
-stub with three demo roles — production uses Supabase Auth).
+**Real (since M4.2):** outcome measurement — after a reply is marked posted, snapshot
+jobs re-check the thread at +1h/+24h/+72h and compute the thread-climate delta against
+a projected no-intervention baseline (plan Ch. 9); the 📈 Outcomes tab shows it, with a
+fast-forward button so demos don't wait three days.
+
+**Faked, honestly:** platform data (fixtures), thread re-fetches for outcome snapshots
+(deterministic mock of the same shape), auth (local session stub with three demo
+roles — production uses Supabase Auth).
 Each fake is the simplest stand-in with the same interface as the real thing.
-=======
-vectors), auth (single demo user). Each fake is the simplest stand-in with the same
-interface as the real thing.
->>>>>>> task/m33-worker
 
 ## Repo map
 

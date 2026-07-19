@@ -81,6 +81,7 @@
       <button :class="{active:tab==='respond'}" @click="tab='respond';loadOpps()">💬 Respond</button>
       <template v-if="session.role!=='responder'">
         <button :class="{active:tab==='studio'}" @click="tab='studio';loadRadar()">🎨 Studio</button>
+        <button :class="{active:tab==='outcomes'}" @click="tab='outcomes';loadOutcomes()">📈 Outcomes</button>
         <button :class="{active:tab==='audit'}" @click="tab='audit';loadAudit()">📋 Audit</button>
       </template>
     </nav>
@@ -280,6 +281,51 @@
       </div>
     </div>
 
+    <!-- ═══════════ OUTCOMES (M4.2) ═══════════ -->
+    <div v-if="tab==='outcomes'">
+      <div class="card">
+        <h2>📈 Outcomes — is it working?</h2>
+        <p class="hint">After a reply is posted, the thread is snapshotted at <b>+1h / +24h / +72h</b>
+          and compared against the projected <b>no-intervention baseline</b> — what the model expects
+          had nobody replied. A green "thread climate Δ" means the conversation got friendlier than
+          that baseline. We measure this, not reply volume (a volume KPI would reward a spam machine).
+          Thread re-fetches are mocked in the prototype; production re-checks the real thread.</p>
+        <div class="row" style="margin-bottom:12px">
+          <button class="btn btn-ghost" @click="fastForward">⏩ Fast-forward time (demo)</button>
+          <span class="meta">Runs the scheduled +1h/+24h/+72h snapshot jobs now instead of waiting.
+            Production simply waits — this button exists so a demo doesn't take three days.</span>
+        </div>
+        <span class="meta" v-if="ffMsg">{{ ffMsg }}</span>
+        <div v-if="!outcomes.length" class="empty">No posted replies yet — complete the 💬 Respond flow
+          (claim → rework → mark as posted) first.</div>
+        <div v-for="p in outcomes" :key="p.id" class="item">
+          <div class="row">
+            <span class="pill pill-plat">reply #{{ p.id }}</span>
+            <a :href="p.posted_url" target="_blank" class="meta">{{ p.posted_url }} ↗</a>
+            <span class="meta">posted {{ p.posted_at }}</span>
+          </div>
+          <div v-if="!p.delta.offsets.length" class="meta" style="margin-top:6px">
+            Snapshots scheduled — waiting for +1h/+24h/+72h (or use fast-forward above).</div>
+          <template v-else>
+            <table style="margin-top:8px">
+              <tr><th>Snapshot</th><th>Thread climate Δ vs baseline</th><th>Thread views</th><th>Replies in thread</th></tr>
+              <tr v-for="o in p.delta.offsets" :key="o.offset">
+                <td>{{ o.offset }}</td>
+                <td :style="{color: o.sentiment_delta > 0 ? 'var(--green)' : 'var(--red)', fontWeight: 700}">
+                  {{ o.sentiment_delta > 0 ? '+' : '' }}{{ o.sentiment_delta }}</td>
+                <td class="meta">{{ fmt(o.views) }}</td>
+                <td class="meta">{{ o.reply_count }}</td>
+              </tr>
+            </table>
+            <p class="meta" style="margin-top:6px">Overall:
+              <b :style="{color: p.delta.overall_sentiment_delta > 0 ? 'var(--green)' : 'var(--red)'}">
+                {{ p.delta.overall_sentiment_delta > 0 ? '+' : '' }}{{ p.delta.overall_sentiment_delta }}</b>
+              mean sentiment vs. the no-intervention baseline</p>
+          </template>
+        </div>
+      </div>
+    </div>
+
     <!-- ═══════════ AUDIT ═══════════ -->
     <div v-if="tab==='audit'">
       <div class="card">
@@ -337,7 +383,7 @@ createApp({
     session: loadSession(),   // {token, username, role} from the dev auth stub
     tab: 'setup', lang: 'de', err: '',
     state: { ai_mode: '…', counts: {} },
-    radar: [], opps: [], audit: [],
+    radar: [], opps: [], audit: [], outcomes: [], ffMsg: '',
     ingestMsg: '', pipeLog: null, queue: null,
     tip: { url: '', text: '' }, tipMsg: '',
     activeDraft: null, draftText: '', gateResult: { checks: [] },
@@ -435,6 +481,16 @@ createApp({
     async loadRadar() { await this.guard(async () => { this.radar = await api('/radar'); }); },
     async loadOpps() { await this.guard(async () => { this.opps = await api('/opportunities'); }); },
     async loadAudit() { await this.guard(async () => { this.audit = await api('/audit'); }); },
+    async loadOutcomes() { await this.guard(async () => { this.outcomes = (await api('/outcomes')).posted; }); },
+    async fastForward() {
+      await this.guard(async () => {
+        const r = await api('/outcomes/fast-forward', { method: 'POST' });
+        this.ffMsg = r.advanced
+          ? `Advanced ${r.advanced} snapshot job(s); processed ${r.processed}.`
+          : 'No snapshot jobs waiting — mark a reply as posted first.';
+        await this.loadOutcomes();
+      });
+    },
     async claimOpp(o) {
       try {
         this.err = '';

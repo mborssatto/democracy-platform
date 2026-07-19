@@ -42,6 +42,14 @@ RATE_CAP_PER_DAY = _int("RATE_CAP_PER_DAY", 5)
 # Jaccard similarity at/above which a reply counts as copypasta.
 COPYPASTA_JACCARD_THRESHOLD = _float("COPYPASTA_JACCARD_THRESHOLD", 0.85)
 
+# --- outcome snapshots (app/outcomes.py, M4.2) -------------------------------
+# Constants of the MOCKED snapshot model only — production measures the real
+# thread instead of modeling it, at which point these disappear.
+# Modeled sentiment lift of an intervened thread vs. the projected baseline.
+OUTCOME_SENTIMENT_LIFT = _float("OUTCOME_SENTIMENT_LIFT", 0.15)
+# Magnitude of the deterministic (hash-seeded, never random) jitter.
+OUTCOME_JITTER = _float("OUTCOME_JITTER", 0.05)
+
 
 def as_dict() -> dict:
     """Active values, for the API/UI (transparency: show the knobs in use)."""

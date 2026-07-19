@@ -180,7 +180,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 
 CREATE TABLE IF NOT EXISTS jobs (
     id INTEGER PRIMARY KEY,
-    kind TEXT NOT NULL,                  -- 'enrich_item' (only kind for now)
+    kind TEXT NOT NULL,                  -- enrich_item | outcome_snapshot
     payload TEXT NOT NULL,               -- JSON, e.g. {"item_id": 7}
     status TEXT DEFAULT 'queued',        -- queued | running | done | dead
     attempts INTEGER DEFAULT 0,
@@ -189,6 +189,25 @@ CREATE TABLE IF NOT EXISTS jobs (
     last_error TEXT,
     created_at TEXT,
     updated_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS outcome_snapshots (
+    -- M4.2: thread re-checks at +1h/+24h/+72h after a reply was posted, plus
+    -- the projected no-intervention baseline per offset (plan Ch. 9: measure
+    -- thread climate, not reply volume). Captured by 'outcome_snapshot' jobs;
+    -- the fetch is MOCKED in the prototype (no real thread API). Deliberately
+    -- NO author fields — the pseudonymization canary applies here too.
+    id INTEGER PRIMARY KEY,
+    posted_action_id INTEGER NOT NULL,
+    offset_label TEXT NOT NULL,          -- '+1h' | '+24h' | '+72h'
+    captured_at TEXT,
+    views INTEGER,
+    likes INTEGER,
+    comments INTEGER,
+    sentiment_score REAL,                -- -1..1 thread climate
+    reply_count INTEGER,
+    is_baseline INTEGER DEFAULT 0,       -- 1 = projected non-intervened baseline
+    UNIQUE(posted_action_id, offset_label, is_baseline)
 );
 """
 
