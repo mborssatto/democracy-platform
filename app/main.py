@@ -7,7 +7,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import config, connectors, db, factcheck, gates, llm, pipeline, pseudo
+from . import config, connectors, db, factcheck, gates, llm, pipeline, pseudo, queue, worker
 
 app = FastAPI(title="Democracy Platform — Prototype")
 FRONTEND = Path(__file__).resolve().parent.parent / "frontend"
@@ -31,6 +31,7 @@ def startup() -> None:
     con = db.connect()
     pipeline.seed_reference_data(con)
     con.close()
+    worker.maybe_start()  # background queue drain — only when RUN_WORKER=1
 
 
 @app.get("/")
@@ -51,16 +52,16 @@ def state():
 
 
 # ------------------------------------------------------------------ ingestion
-@app.post("/api/ingest/{source}")
-def ingest(source: str):
-    fetchers = {"tiktok": connectors.fetch_tiktok,
-                "junkipedia": connectors.fetch_junkipedia,
-                "tipline": connectors.fetch_tipline}
-    if source not in fetchers:
-        raise HTTPException(404, f"Unknown source '{source}'. Available: {', '.join(sorted(fetchers))}.")
-    con = db.connect()
+SOURCES = {"tiktok": connectors.fetch_tiktok,
+           "junkipedia": connectors.fetch_junkipedia,
+           "tipline": connectors.fetch_tipline}
+
+
+def ingest_source(con, source: str) -> dict:
+    """Fetch one source, insert new items, and enqueue an 'enrich_item' job per
+    NEW item. Shared by the ingest endpoint and the periodic scheduler."""
     new = 0
-    for item in fetchers[source]():
+    for item in SOURCES[source]():
         # Pseudonymize at the boundary: the real handle never enters content_items.
         pseudo_id = pseudo.pseudonymize(item["real_author_id"])
         pseudo.store_mapping(con, item["real_author_id"], pseudo_id)
@@ -74,10 +75,23 @@ def ingest(source: str):
              item["text"], item["text_en"], item["url"], item["posted_at"], db.now(),
              item["views"], item["views_prev"], item["likes"], item["comments"], item["shares"]),
         )
-        new += cur.rowcount
-    db.audit(con, "ingestion", f"ingest_{source}", {"new_items": new})
-    con.commit(); con.close()
-    return {"source": source, "new_items": new}
+        if cur.rowcount:  # inserted (not a duplicate) → queue it for enrichment
+            queue.enqueue(con, "enrich_item", {"item_id": cur.lastrowid})
+            new += 1
+    db.audit(con, "ingestion", f"ingest_{source}", {"new_items": new, "enqueued": new})
+    con.commit()
+    return {"source": source, "new_items": new, "enqueued": new}
+
+
+@app.post("/api/ingest/{source}")
+def ingest(source: str):
+    if source not in SOURCES:
+        raise HTTPException(404, f"Unknown source '{source}'. Available: {', '.join(sorted(SOURCES))}.")
+    con = db.connect()
+    try:
+        return ingest_source(con, source)
+    finally:
+        con.close()
 
 
 class TipIn(BaseModel):
@@ -91,12 +105,13 @@ def tipline_submit(tip: TipIn):
     """The tipline is a REAL feature (no external integration needed)."""
     con = db.connect()
     pseudo_id = pseudo.pseudonymize("tipline:" + tip.url)
-    con.execute(
+    cur = con.execute(
         "INSERT INTO content_items (platform, platform_item_id, author_pseudo, author_followers_band, "
         "text, url, posted_at, ingested_at, views, views_prev) "
         "VALUES ('tipline', ?, ?, 'unknown', ?, ?, ?, ?, 6000, 0)",
         (f"tip-{abs(hash(tip.url + tip.text)) % 10**8}", pseudo_id, tip.text, tip.url, db.now(), db.now()),
     )
+    queue.enqueue(con, "enrich_item", {"item_id": cur.lastrowid})
     db.audit(con, "community", "tipline_submission", {"url": tip.url})
     con.commit(); con.close()
     return {"ok": True}
@@ -116,17 +131,74 @@ def sync_factchecks():
 # ------------------------------------------------------------------ pipeline
 @app.post("/api/pipeline/run")
 def pipeline_run():
+    """Manual "process everything now": drains the job queue synchronously with
+    the exact same claim/complete/fail semantics as the background worker, so
+    retries and dead-lettering behave identically either way."""
     con = db.connect()
     try:
         pending = con.execute("SELECT COUNT(*) c FROM content_items WHERE status='pending'").fetchone()["c"]
-        log = pipeline.run_pipeline(con)
+
+        # Backfill: pending items without a live job (e.g. rows from before the
+        # queue existed) get one, so "run" still means "process everything".
+        covered = set()
+        for r in con.execute("SELECT payload FROM jobs WHERE kind='enrich_item' "
+                             "AND status IN ('queued','running')").fetchall():
+            covered.add(json.loads(r["payload"]).get("item_id"))
+        for r in con.execute("SELECT id FROM content_items WHERE status='pending'").fetchall():
+            if r["id"] not in covered:
+                queue.enqueue(con, "enrich_item", {"item_id": r["id"]})
+        con.commit()
+
+        log = {"triage_kept": 0, "triage_dropped": 0, "classified": 0,
+               "claim_matched": 0, "opportunities": 0, "mode": llm.mode()}
+        drained = 0
+        while (job := queue.claim_next(con)) is not None:
+            item_log = worker.process_job(con, job)  # commits/fails per job
+            for key, n in (item_log or {}).items():
+                log[key] += n
+            drained += 1
+        log["jobs_processed"] = drained
+        db.audit(con, "pipeline", "run", log)
+        con.commit()
     finally:
         # Always release the connection — a leaked one holds locks on Postgres.
         con.close()
     log["pending_before"] = pending
-    if pending == 0:
+    if pending == 0 and drained == 0:
         log["note"] = "Nothing new to process — ingest data first (or submit a tip)."
     return log
+
+
+# ------------------------------------------------------------------ job queue
+@app.get("/api/queue")
+def queue_status():
+    """Queue depth for the UI, plus the dead-letter view (jobs that failed
+    max_attempts times and now wait for a human to inspect/retry)."""
+    con = db.connect()
+    depth = queue.queue_depth(con)
+    dead = con.execute(
+        "SELECT id, payload, attempts, last_error, updated_at FROM jobs "
+        "WHERE status='dead' ORDER BY updated_at DESC, id DESC LIMIT 20").fetchall()
+    con.close()
+    return {"depth": depth, "dead": [dict(r) for r in dead]}
+
+
+@app.post("/api/queue/dead/{job_id}/retry")
+def retry_dead_job(job_id: int):
+    """Put a dead-lettered job back in the queue with a fresh attempt budget."""
+    con = db.connect()
+    row = con.execute("SELECT status FROM jobs WHERE id=?", (job_id,)).fetchone()
+    if not row:
+        con.close()
+        raise HTTPException(404, "Job not found.")
+    if row["status"] != "dead":
+        con.close()
+        raise HTTPException(409, f"Job is '{row['status']}', not dead — only dead jobs can be retried.")
+    con.execute("UPDATE jobs SET status='queued', attempts=0, run_after=?, updated_at=? WHERE id=?",
+                (db.now(), db.now(), job_id))
+    db.audit(con, "demo-user", "dead_job_retried", {"job": job_id})
+    con.commit(); con.close()
+    return {"ok": True}
 
 
 # ------------------------------------------------------------------ radar

@@ -112,6 +112,24 @@
           <div class="gate ok">✔ Matched {{ pipeLog.claim_matched }} posts to published fact-checks</div>
           <div class="gate ok">✔ Created {{ pipeLog.opportunities }} response opportunities (low-reach posts never surface)</div>
         </div>
+        <div v-if="queue" style="margin-top:12px">
+          <span class="meta">Job queue: <b>{{ queue.depth.queued }}</b> queued ·
+            <b>{{ queue.depth.running }}</b> running · <b>{{ queue.depth.done }}</b> done ·
+            <b>{{ queue.depth.dead }}</b> dead</span>
+          <div v-if="queue.depth.dead > 0" style="margin-top:8px">
+            <div class="gate fail">✖ {{ queue.depth.dead }} job(s) failed repeatedly and were parked
+              (dead-letter) — nothing is lost; inspect the error and retry.</div>
+            <table style="margin-top:6px">
+              <tr><th>Job</th><th>Attempts</th><th>Last error</th><th></th></tr>
+              <tr v-for="j in queue.dead" :key="j.id">
+                <td class="meta">#{{ j.id }} · {{ j.payload }}</td>
+                <td>{{ j.attempts }}</td>
+                <td class="meta">{{ j.last_error }}</td>
+                <td><button class="btn btn-ghost" style="padding:3px 10px" @click="retryJob(j.id)">Retry</button></td>
+              </tr>
+            </table>
+          </div>
+        </div>
       </div>
       <div class="card">
         <h2>3 · Submit a tip (working feature)</h2>
@@ -287,14 +305,19 @@ createApp({
     tab: 'setup', lang: 'de', err: '',
     state: { ai_mode: '…', counts: {} },
     radar: [], opps: [], audit: [],
-    ingestMsg: '', pipeLog: null,
+    ingestMsg: '', pipeLog: null, queue: null,
     tip: { url: '', text: '' }, tipMsg: '',
     activeDraft: null, draftText: '', gateResult: { checks: [] },
     showPostedForm: false, postedUrl: '', postedMsg: '', copied: false,
     brief: null,
     _debounce: null,
   }),
-  mounted() { this.refreshState(); },
+  mounted() {
+    this.refreshState(); this.loadQueue();
+    // Poll queue depth while the Data tab is visible (the background worker
+    // drains jobs on its own — this keeps the numbers honest).
+    setInterval(() => { if (this.tab === 'setup') this.loadQueue(); }, 3000);
+  },
   methods: {
     fmt(n) { return n >= 1000 ? (n/1000).toFixed(n>=100000?0:1) + 'k' : n; },
     gateLabel(n) {
@@ -308,11 +331,21 @@ createApp({
       catch (e) { this.err = e.message; }
     },
     async refreshState() { await this.guard(async () => { this.state = await api('/state'); }); },
+    async loadQueue() {
+      // Silent on failure: this runs on a timer and must not spam the banner.
+      try { this.queue = await api('/queue'); } catch (e) {}
+    },
+    async retryJob(id) {
+      await this.guard(async () => {
+        await api(`/queue/dead/${id}/retry`, { method:'POST' });
+        await this.loadQueue();
+      });
+    },
     async ingest(src) {
       await this.guard(async () => {
         const r = await api('/ingest/'+src, { method:'POST' });
-        this.ingestMsg = `+${r.new_items} new items from ${src}`;
-        this.refreshState();
+        this.ingestMsg = `+${r.new_items} new items from ${src} (${r.enqueued} queued for enrichment)`;
+        this.refreshState(); this.loadQueue();
       });
     },
     async syncFactchecks() {
@@ -326,7 +359,7 @@ createApp({
     async runPipeline() {
       await this.guard(async () => {
         this.pipeLog = await api('/pipeline/run', { method:'POST' });
-        this.refreshState();
+        this.refreshState(); this.loadQueue();
       });
     },
     async submitTip() {

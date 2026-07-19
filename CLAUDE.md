@@ -20,7 +20,8 @@ No build step: the frontend is a single Vue page (`frontend/index.html`, vendore
 - `app/main.py` — FastAPI endpoints + serves the frontend. One deployable.
 - `app/pipeline.py` — the 6 enrichment stages: triage(+EN translation) → classify →
   embed(stand-in) → claim-match → score → opportunity. Stages are idempotent
-  (`UNIQUE(item_id, stage)`); the prototype runs them synchronously (plan: pg queue).
+  (`UNIQUE(item_id, stage)`); they run per-item via the job queue (`app/queue.py`,
+  SKIP LOCKED on Postgres) drained by `app/worker.py` or the "Run pipeline" button.
 - `app/llm.py` — ALL AI calls go through here. Mock by default; real model when
   `ANTHROPIC_API_KEY`/`OPENAI_API_KEY` is in `.env`. Mock and real must always return
   identical shapes. No LangChain or agent frameworks — keep this file thin.

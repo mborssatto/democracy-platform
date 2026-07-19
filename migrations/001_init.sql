@@ -122,3 +122,16 @@ CREATE TABLE IF NOT EXISTS audit_log (
     id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     actor text, action text, detail text, created_at text
 );
+
+CREATE TABLE IF NOT EXISTS jobs (
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    kind text NOT NULL,                  -- 'enrich_item' (only kind for now)
+    payload text NOT NULL,               -- JSON, e.g. {"item_id": 7}
+    status text DEFAULT 'queued',        -- queued | running | done | dead
+    attempts integer DEFAULT 0,
+    max_attempts integer DEFAULT 3,
+    run_after text,                      -- ISO; claimable only when <= now (backoff)
+    last_error text,
+    created_at text,
+    updated_at text
+);

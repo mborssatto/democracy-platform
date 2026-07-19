@@ -1,8 +1,9 @@
 """The enrichment pipeline: 6 small, versioned, re-runnable stages.
 
-Prototype simplification: stages run synchronously when you press "Run pipeline"
-(the full plan uses a Postgres job queue with SKIP LOCKED — same stages, same
-order, just asynchronous). Each stage writes one row to `enrichments`
+`enrich_item` runs all stages for ONE item; it is what the job queue executes
+(app/queue.py + app/worker.py, SKIP LOCKED on Postgres). `run_pipeline` is the
+synchronous "process everything now" path over all pending items — same code,
+same order. Each stage writes one row to `enrichments`
 (UNIQUE(item_id, stage) = idempotency: re-running never duplicates work).
 """
 import json
@@ -22,8 +23,69 @@ def _store(con, item_id: int, stage: str, output: dict) -> None:
     )
 
 
+def enrich_item(con, item, claims) -> dict:
+    """Run all 6 stages for one item. Returns a per-item stage log (0/1 counts,
+    summable across items). Does NOT commit — the caller owns the transaction
+    (run_pipeline below, or one job in app/worker.py)."""
+    log = {"triage_kept": 0, "triage_dropped": 0, "classified": 0,
+           "claim_matched": 0, "opportunities": 0}
+
+    # ---- Stage 1: triage (+ translation) ------------------------------------
+    verdict = llm.triage(item["text"])
+    _store(con, item["id"], "triage", verdict)
+    if not verdict["relevant"]:
+        con.execute("UPDATE content_items SET status='triaged_out' WHERE id=?", (item["id"],))
+        log["triage_dropped"] += 1
+        return log
+    if not item["text_en"]:
+        con.execute("UPDATE content_items SET text_en=? WHERE id=?",
+                    (llm.translate(item["text"]), item["id"]))
+    log["triage_kept"] += 1
+
+    # ---- Stage 2: classify into a narrative ---------------------------------
+    cls = llm.classify(item["text"])
+    _store(con, item["id"], "classify", cls)
+    log["classified"] += 1
+
+    # ---- Stage 3+4: embed & claim-match -------------------------------------
+    # Prototype: word-overlap similarity stands in for embedding search
+    # (plan: pgvector cosine over real embeddings — same idea, better math).
+    best = _match_claim(item["text"], cls["narrative"], claims)
+    if best:
+        claim, sim = best
+        con.execute(
+            db.sql_upsert(
+                "INTO claim_matches (item_id, claim_id, similarity) VALUES (?,?,?)",
+                conflict="item_id, claim_id", update_cols=("similarity",)),
+            (item["id"], claim["id"], sim),
+        )
+        _store(con, item["id"], "claim_match",
+               {"claim_id": claim["id"], "similarity": sim, "fact_checker": claim["fact_checker"]})
+        log["claim_matched"] += 1
+
+    # ---- Stage 5: score ------------------------------------------------------
+    score, breakdown = _score(item, cls, bool(best))
+    _store(con, item["id"], "score", {"score": score, "breakdown": breakdown})
+
+    # ---- Stage 6: opportunity -----------------------------------------------
+    if score >= config.SCORE_THRESHOLD:
+        expiry_sql, expiry_param = db.sql_expiry(config.OPPORTUNITY_EXPIRY_HOURS)
+        con.execute(
+            db.sql_insert_ignore(
+                "INTO opportunities "
+                "(item_id, kind, score, score_breakdown, status, expires_at) "
+                f"VALUES (?,?,?,?, 'open', {expiry_sql})"),
+            (item["id"], "reply", score, json.dumps(breakdown), expiry_param),
+        )
+        log["opportunities"] += 1
+
+    con.execute("UPDATE content_items SET status='enriched' WHERE id=?", (item["id"],))
+    return log
+
+
 def run_pipeline(con) -> dict:
-    """Process every pending item through all stages. Returns a stage-by-stage log."""
+    """Process every pending item through all stages, synchronously.
+    Returns a stage-by-stage log."""
     log = {"triage_kept": 0, "triage_dropped": 0, "classified": 0,
            "claim_matched": 0, "opportunities": 0, "mode": llm.mode()}
 
@@ -31,56 +93,8 @@ def run_pipeline(con) -> dict:
     claims = con.execute("SELECT * FROM claims").fetchall()
 
     for item in items:
-        # ---- Stage 1: triage (+ translation) --------------------------------
-        verdict = llm.triage(item["text"])
-        _store(con, item["id"], "triage", verdict)
-        if not verdict["relevant"]:
-            con.execute("UPDATE content_items SET status='triaged_out' WHERE id=?", (item["id"],))
-            log["triage_dropped"] += 1
-            continue
-        if not item["text_en"]:
-            con.execute("UPDATE content_items SET text_en=? WHERE id=?",
-                        (llm.translate(item["text"]), item["id"]))
-        log["triage_kept"] += 1
-
-        # ---- Stage 2: classify into a narrative -----------------------------
-        cls = llm.classify(item["text"])
-        _store(con, item["id"], "classify", cls)
-        log["classified"] += 1
-
-        # ---- Stage 3+4: embed & claim-match ---------------------------------
-        # Prototype: word-overlap similarity stands in for embedding search
-        # (plan: pgvector cosine over real embeddings — same idea, better math).
-        best = _match_claim(item["text"], cls["narrative"], claims)
-        if best:
-            claim, sim = best
-            con.execute(
-                db.sql_upsert(
-                    "INTO claim_matches (item_id, claim_id, similarity) VALUES (?,?,?)",
-                    conflict="item_id, claim_id", update_cols=("similarity",)),
-                (item["id"], claim["id"], sim),
-            )
-            _store(con, item["id"], "claim_match",
-                   {"claim_id": claim["id"], "similarity": sim, "fact_checker": claim["fact_checker"]})
-            log["claim_matched"] += 1
-
-        # ---- Stage 5: score --------------------------------------------------
-        score, breakdown = _score(item, cls, bool(best))
-        _store(con, item["id"], "score", {"score": score, "breakdown": breakdown})
-
-        # ---- Stage 6: opportunity -------------------------------------------
-        if score >= config.SCORE_THRESHOLD:
-            expiry_sql, expiry_param = db.sql_expiry(config.OPPORTUNITY_EXPIRY_HOURS)
-            con.execute(
-                db.sql_insert_ignore(
-                    "INTO opportunities "
-                    "(item_id, kind, score, score_breakdown, status, expires_at) "
-                    f"VALUES (?,?,?,?, 'open', {expiry_sql})"),
-                (item["id"], "reply", score, json.dumps(breakdown), expiry_param),
-            )
-            log["opportunities"] += 1
-
-        con.execute("UPDATE content_items SET status='enriched' WHERE id=?", (item["id"],))
+        for key, n in enrich_item(con, item, claims).items():
+            log[key] += n
 
     db.audit(con, "pipeline", "run", log)
     con.commit()
