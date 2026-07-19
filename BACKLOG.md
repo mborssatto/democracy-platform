@@ -1,5 +1,9 @@
 # BACKLOG — prioritized, Claude Code-ready
 
+> **Status 2026-07-20: ALL tasks M1.1–M4.4 are DONE** (implemented, tested on both
+> DB backends, merged to main). Only the "Parked" section below remains open —
+> each item is blocked on an external decision or approval, not on code.
+
 Each task is scoped to be one Claude Code session or less, with acceptance criteria.
 Work top to bottom unless Mariana reprioritizes. Keep `python -m pytest tests/ -q` green.
 
