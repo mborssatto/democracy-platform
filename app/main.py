@@ -7,7 +7,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import auth, config, connectors, db, factcheck, gates, llm, pipeline, pseudo, queue, worker
+from . import auth, config, connectors, db, factcheck, gates, llm, outcomes, pipeline, pseudo, queue, worker
 
 app = FastAPI(title="Democracy Platform — Prototype")
 FRONTEND = Path(__file__).resolve().parent.parent / "frontend"
@@ -390,14 +390,69 @@ def mark_posted(draft_id: int, body: PostedIn, user: dict = ANY_USER):
     if d["status"] != "post_ready":
         con.close()
         raise HTTPException(409, "draft has not passed all gates")
-    con.execute(db.sql_insert_ignore("INTO posted_actions (draft_id, posted_url, posted_at) VALUES (?,?,?)"),
-                (draft_id, body.posted_url, db.now()))
+    cur = con.execute(db.sql_insert_ignore("INTO posted_actions (draft_id, posted_url, posted_at) VALUES (?,?,?)"),
+                      (draft_id, body.posted_url, db.now()))
     con.execute("UPDATE drafts SET status='posted' WHERE id=?", (draft_id,))
     con.execute("UPDATE opportunities SET status='posted' "
                 "WHERE id=(SELECT opportunity_id FROM drafts WHERE id=?)", (draft_id,))
+    # M4.2: schedule the +1h/+24h/+72h outcome snapshots — only for a NEWLY
+    # recorded post (rowcount 0 = duplicate mark-posted; don't re-schedule).
+    # lastrowid is unreliable after INSERT ... ON CONFLICT DO NOTHING on
+    # Postgres, so fetch the id by the UNIQUE draft_id instead.
+    if cur.rowcount:
+        pa = con.execute("SELECT id FROM posted_actions WHERE draft_id=?", (draft_id,)).fetchone()
+        outcomes.schedule_snapshots(con, pa["id"])
     db.audit(con, user["username"], "marked_posted", {"draft": draft_id, "url": body.posted_url})
     con.commit(); con.close()
     return {"ok": True}
+
+
+# ------------------------------------------------------------------ outcomes (M4.2)
+@app.get("/api/outcomes")
+def outcomes_view(user: dict = STAFF):
+    """Every posted reply with its thread snapshots and climate delta — the
+    "is it working?" view. Plan Ch. 9: we measure the thread climate against a
+    projected no-intervention baseline, not our own reply volume."""
+    con = db.connect()
+    posted = []
+    for pa in con.execute("SELECT * FROM posted_actions ORDER BY id DESC").fetchall():
+        snaps = con.execute(
+            "SELECT * FROM outcome_snapshots WHERE posted_action_id=? ORDER BY id",
+            (pa["id"],)).fetchall()
+        posted.append(dict(pa) | {
+            "snapshots": [dict(s) for s in snaps],
+            "delta": outcomes.climate_delta(con, pa["id"]),
+        })
+    con.close()
+    return {"posted": posted,
+            "note": "Each posted reply is re-checked at +1h/+24h/+72h. The delta "
+                    "compares thread climate against what the model projects had "
+                    "nobody replied. Thread re-fetches are mocked in the prototype."}
+
+
+@app.post("/api/outcomes/fast-forward")
+def outcomes_fast_forward(user: dict = STAFF):
+    """Demo "time travel": make every queued outcome_snapshot job runnable NOW,
+    then drain the queue synchronously with the same claim/complete/fail loop
+    as /api/pipeline/run. Production needs no such endpoint — the jobs'
+    run_after already gates the real +1h/+24h/+72h timing; it just waits."""
+    con = db.connect()
+    try:
+        cur = con.execute(
+            "UPDATE jobs SET run_after=?, updated_at=? "
+            "WHERE kind='outcome_snapshot' AND status='queued'",
+            (db.now(), db.now()))
+        advanced = cur.rowcount
+        drained = 0
+        while (job := queue.claim_next(con)) is not None:
+            worker.process_job(con, job)  # commits/fails per job
+            drained += 1
+        db.audit(con, user["username"], "outcomes_fast_forward",
+                 {"jobs_advanced": advanced, "jobs_processed": drained})
+        con.commit()
+    finally:
+        con.close()
+    return {"advanced": advanced, "processed": drained}
 
 
 # ------------------------------------------------------------------ studio

@@ -21,17 +21,18 @@ from . import db
 BACKOFF_BASE_SECONDS = 30
 
 
-def _iso_in(seconds: float) -> str:
+def iso_in(seconds: float) -> str:
     """ISO timestamp `seconds` from now, same format as db.now()."""
     return time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(time.time() + seconds))
 
 
-def enqueue(con, kind: str, payload: dict) -> int:
-    """Insert a queued job, runnable immediately. Caller commits."""
+def enqueue(con, kind: str, payload: dict, run_after: str | None = None) -> int:
+    """Insert a queued job — runnable immediately, or from `run_after` (ISO
+    timestamp, e.g. iso_in(3600) for '+1h') when given. Caller commits."""
     cur = con.execute(
         "INSERT INTO jobs (kind, payload, status, run_after, created_at, updated_at) "
         "VALUES (?,?,'queued',?,?,?)",
-        (kind, json.dumps(payload), db.now(), db.now(), db.now()),
+        (kind, json.dumps(payload), run_after or db.now(), db.now(), db.now()),
     )
     return cur.lastrowid
 
@@ -83,7 +84,7 @@ def fail(con, job, error: str) -> None:
         con.execute(
             "UPDATE jobs SET status='queued', attempts=?, last_error=?, run_after=?, updated_at=? "
             "WHERE id=?",
-            (attempts, error, _iso_in(backoff), db.now(), job["id"]),
+            (attempts, error, iso_in(backoff), db.now(), job["id"]),
         )
 
 

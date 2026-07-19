@@ -17,7 +17,7 @@ import os
 import threading
 import time
 
-from . import db, pipeline, queue
+from . import db, outcomes, pipeline, queue
 
 
 def poll_seconds() -> float:
@@ -34,16 +34,22 @@ def process_job(con, job) -> dict | None:
     commit. Returns the per-item stage log, or None when nothing was enriched.
     Never raises on job errors — they land in the job row instead."""
     try:
-        if job["kind"] != "enrich_item":
-            raise ValueError(f"unknown job kind '{job['kind']}'")
-        item_id = json.loads(job["payload"])["item_id"]
-        item = con.execute("SELECT * FROM content_items WHERE id=?", (item_id,)).fetchone()
-        if item is None:
-            raise ValueError(f"content item {item_id} not found")
+        payload = json.loads(job["payload"])
         item_log = None
-        if item["status"] == "pending":  # idempotent: an already-enriched item is a no-op
-            claims = con.execute("SELECT * FROM claims").fetchall()
-            item_log = pipeline.enrich_item(con, item, claims)
+        if job["kind"] == "enrich_item":
+            item_id = payload["item_id"]
+            item = con.execute("SELECT * FROM content_items WHERE id=?", (item_id,)).fetchone()
+            if item is None:
+                raise ValueError(f"content item {item_id} not found")
+            if item["status"] == "pending":  # idempotent: an already-enriched item is a no-op
+                claims = con.execute("SELECT * FROM claims").fetchall()
+                item_log = pipeline.enrich_item(con, item, claims)
+        elif job["kind"] == "outcome_snapshot":
+            # M4.2: re-check a thread we replied in (+1h/+24h/+72h) — mocked
+            # fetch, idempotent write; see app/outcomes.py.
+            outcomes.capture_snapshot(con, payload["posted_action_id"], payload["offset"])
+        else:
+            raise ValueError(f"unknown job kind '{job['kind']}'")
         queue.complete(con, job["id"])
         con.commit()
         return item_log
