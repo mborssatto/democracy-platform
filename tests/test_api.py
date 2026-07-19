@@ -7,9 +7,7 @@ from app import db, main, pipeline
 
 
 @pytest.fixture()
-def client(tmp_path, monkeypatch):
-    monkeypatch.setattr(db, "DB_PATH", tmp_path / "test.db")
-    db.init_db()
+def client(fresh_db):
     con = db.connect()
     pipeline.seed_reference_data(con)
     con.close()

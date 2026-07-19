@@ -12,7 +12,6 @@ import base64
 import hashlib
 import hmac
 import os
-import sqlite3
 
 from . import db
 
@@ -26,17 +25,17 @@ def pseudonymize(real_author_id: str) -> str:
     return "anon_" + digest[:12]
 
 
-def store_mapping(con: sqlite3.Connection, real_author_id: str, pseudo: str) -> None:
+def store_mapping(con, real_author_id: str, pseudo: str) -> None:
     # Prototype "encryption": base64 stand-in, clearly marked. In production this is
     # real application-layer encryption with its own key. Never rely on encoding.
     fake_encrypted = "DEMO-ENC:" + base64.b64encode(real_author_id.encode()).decode()
     con.execute(
-        "INSERT OR IGNORE INTO reid_vault (author_pseudo, real_id_encrypted) VALUES (?,?)",
+        db.sql_insert_ignore("INTO reid_vault (author_pseudo, real_id_encrypted) VALUES (?,?)"),
         (pseudo, fake_encrypted),
     )
 
 
-def vault_lookup(con: sqlite3.Connection, pseudo: str, justification: str) -> str | None:
+def vault_lookup(con, pseudo: str, justification: str) -> str | None:
     """The ONLY way to re-identify. Every call is written to the audit log."""
     db.audit(con, "system", "reid_vault_access", {"pseudo": pseudo, "justification": justification})
     row = con.execute(

@@ -7,9 +7,7 @@ from app import connectors, db, llm, pipeline, pseudo
 
 
 @pytest.fixture()
-def con(tmp_path, monkeypatch):
-    monkeypatch.setattr(db, "DB_PATH", tmp_path / "test.db")
-    db.init_db()
+def con(fresh_db):
     c = db.connect()
     pipeline.seed_reference_data(c)
     yield c
@@ -22,9 +20,10 @@ def _ingest_all(con):
             p = pseudo.pseudonymize(item["real_author_id"])
             pseudo.store_mapping(con, item["real_author_id"], p)
             con.execute(
-                "INSERT OR IGNORE INTO content_items (platform, platform_item_id, author_pseudo, "
-                "author_followers_band, text, text_en, url, posted_at, ingested_at, views, views_prev, "
-                "likes, comments, shares) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                db.sql_insert_ignore(
+                    "INTO content_items (platform, platform_item_id, author_pseudo, "
+                    "author_followers_band, text, text_en, url, posted_at, ingested_at, views, views_prev, "
+                    "likes, comments, shares) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)"),
                 (item["platform"], item["platform_item_id"], p, item["followers_band"], item["text"],
                  item["text_en"], item["url"], item["posted_at"], db.now(), item["views"],
                  item["views_prev"], item["likes"], item["comments"], item["shares"]))
