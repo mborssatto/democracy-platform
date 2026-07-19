@@ -126,8 +126,8 @@ def seed_reference_data(con) -> None:
         )
     for c in connectors.load_factchecks():
         con.execute(
-            "INSERT OR IGNORE INTO claims (id, claim_de, claim_en, verdict, fact_checker, url, narrative_code, published_at) "
-            "VALUES (?,?,?,?,?,?,?,?)",
+            "INSERT OR IGNORE INTO claims (id, claim_de, claim_en, verdict, fact_checker, url, narrative_code, published_at, source) "
+            "VALUES (?,?,?,?,?,?,?,?,'mock')",
             (c["id"], c["claim_de"], c["claim_en"], c["verdict"],
              c["fact_checker"], c["url"], c["narrative_code"], c["published_at"]),
         )

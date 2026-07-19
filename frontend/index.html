@@ -96,6 +96,7 @@
           <button class="btn btn-blue" @click="ingest('tiktok')">Ingest TikTok (mock)</button>
           <button class="btn btn-blue" @click="ingest('junkipedia')">Ingest Junkipedia (mock)</button>
           <button class="btn btn-blue" @click="ingest('tipline')">Ingest tipline queue</button>
+          <button class="btn btn-blue" @click="syncFactchecks">Sync fact-checks (Google API)</button>
           <span class="meta" v-if="ingestMsg">{{ ingestMsg }}</span>
         </div>
       </div>
@@ -301,6 +302,14 @@ createApp({
         const r = await api('/ingest/'+src, { method:'POST' });
         this.ingestMsg = `+${r.new_items} new items from ${src}`;
         this.refreshState();
+      });
+    },
+    async syncFactchecks() {
+      await this.guard(async () => {
+        const r = await api('/sync/factchecks', { method:'POST' });
+        this.ingestMsg = r.mode === 'real'
+          ? `Fact-check sync: ${r.upserted} fact-checks upserted from ${r.queried_keywords} keyword queries`
+          : (r.note || 'Mock mode — no FACTCHECK_API_KEY set');
       });
     },
     async runPipeline() {

@@ -7,7 +7,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import connectors, db, gates, llm, pipeline, pseudo
+from . import connectors, db, factcheck, gates, llm, pipeline, pseudo
 
 app = FastAPI(title="Democracy Platform — Prototype")
 FRONTEND = Path(__file__).resolve().parent.parent / "frontend"
@@ -99,6 +99,17 @@ def tipline_submit(tip: TipIn):
     db.audit(con, "community", "tipline_submission", {"url": tip.url})
     con.commit(); con.close()
     return {"ok": True}
+
+
+@app.post("/api/sync/factchecks")
+def sync_factchecks():
+    """Sync published fact-checks from the Google Fact Check Tools API into the
+    `claims` table (real mode needs FACTCHECK_API_KEY; otherwise mock fallback).
+    We only ever INGEST published verdicts — never generate them (hard rule #3)."""
+    con = db.connect()
+    result = factcheck.sync_factchecks(con)
+    con.close()
+    return result
 
 
 # ------------------------------------------------------------------ pipeline
