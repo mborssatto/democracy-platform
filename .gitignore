@@ -6,3 +6,9 @@ data/*.db
 .env
 .DS_Store
 evals/results/
+
+# frontend-nuxt (M4.1): never commit deps or build output
+node_modules/
+.nuxt/
+frontend-nuxt/.output/
+frontend-nuxt/dist
