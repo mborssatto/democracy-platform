@@ -7,10 +7,10 @@ order, just asynchronous). Each stage writes one row to `enrichments`
 """
 import json
 
-from . import connectors, db, llm
+from . import config, connectors, db, llm
 
-AMPLIFICATION_FLOOR_VIEWS = 5000   # below this reach we NEVER surface content
-SCORE_THRESHOLD = 40.0             # opportunity is created at/above this score
+# Thresholds (amplification floor, score threshold, opportunity expiry) live in
+# app/config.py — env-overridable, read at call time as config.NAME.
 
 
 def _store(con, item_id: int, stage: str, output: dict) -> None:
@@ -66,12 +66,13 @@ def run_pipeline(con) -> dict:
         _store(con, item["id"], "score", {"score": score, "breakdown": breakdown})
 
         # ---- Stage 6: opportunity -------------------------------------------
-        if score >= SCORE_THRESHOLD:
+        if score >= config.SCORE_THRESHOLD:
             con.execute(
                 "INSERT OR IGNORE INTO opportunities "
                 "(item_id, kind, score, score_breakdown, status, expires_at) "
-                "VALUES (?,?,?,?, 'open', datetime('now', '+72 hours'))",
-                (item["id"], "reply", score, json.dumps(breakdown)),
+                "VALUES (?,?,?,?, 'open', datetime('now', ?))",
+                (item["id"], "reply", score, json.dumps(breakdown),
+                 f"+{config.OPPORTUNITY_EXPIRY_HOURS} hours"),
             )
             log["opportunities"] += 1
 
@@ -99,8 +100,8 @@ def _match_claim(text: str, narrative: str, claims) -> tuple | None:
 def _score(item, cls: dict, has_factcheck: bool) -> tuple[float, dict]:
     """Transparent weighted score. Every number is explainable in the UI."""
     # Hard floor: never surface low-reach content (amplification risk).
-    if item["views"] < AMPLIFICATION_FLOOR_VIEWS:
-        return 0.0, {"blocked": f"below amplification floor ({item['views']} < {AMPLIFICATION_FLOOR_VIEWS} views)"}
+    if item["views"] < config.AMPLIFICATION_FLOOR_VIEWS:
+        return 0.0, {"blocked": f"below amplification floor ({item['views']} < {config.AMPLIFICATION_FLOOR_VIEWS} views)"}
 
     velocity = (item["views"] - item["views_prev"]) / max(1, item["views_prev"])  # growth rate
     velocity_pts = min(40.0, round(velocity * 20, 1))

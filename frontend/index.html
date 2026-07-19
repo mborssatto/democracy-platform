@@ -183,7 +183,7 @@
         <div class="seed"><b>AI seed (immutable):</b><br>{{ activeDraft.ai_seed }}</div>
         <textarea v-model="draftText" @input="debouncedCheck"></textarea>
         <div class="meter"><div :style="{width: Math.min(100, gateResult.edit_distance_pct||0)+'%'}"></div></div>
-        <p class="meta">Edit distance: {{ gateResult.edit_distance_pct || 0 }}% (need ≥15% + substantive rework)</p>
+        <p class="meta">Edit distance: {{ gateResult.edit_distance_pct || 0 }}% (need ≥{{ state.config ? state.config.edit_gate_min_pct : 15 }}% + substantive rework)</p>
         <div v-for="c in gateResult.checks" :key="c.name" class="gate" :class="c.passed?'ok':'fail'">
           <span>{{ c.passed ? '✔' : '✖' }}</span><span><b>{{ gateLabel(c.name) }}:</b> {{ c.detail }}</span>
         </div>
@@ -251,6 +251,17 @@
         </table>
       </div>
     </div>
+
+    <!-- Active thresholds (from app/config.py — env-overridable, see .env.example) -->
+    <p class="meta" style="text-align:center;margin-top:20px" v-if="state.config">
+      Active thresholds: floor {{ fmt(state.config.amplification_floor_views) }} views ·
+      score ≥{{ state.config.score_threshold }} ·
+      edit ≥{{ state.config.edit_gate_min_pct }}% ·
+      dwell {{ state.config.dwell_min_seconds }}s ·
+      cap {{ state.config.rate_cap_per_day }}/day ·
+      copypasta ≥{{ Math.round(state.config.copypasta_jaccard_threshold * 100) }}% ·
+      expiry {{ state.config.opportunity_expiry_hours }}h
+    </p>
   </main>
 </div>
 
