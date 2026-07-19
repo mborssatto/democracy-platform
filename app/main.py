@@ -2,16 +2,27 @@
 import json
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from . import connectors, db, gates, llm, pipeline, pseudo
 
 app = FastAPI(title="Democracy Platform — Prototype")
 FRONTEND = Path(__file__).resolve().parent.parent / "frontend"
 app.mount("/static", StaticFiles(directory=FRONTEND), name="static")
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception(request: Request, exc: Exception) -> JSONResponse:
+    """Last-resort net: any unexpected error becomes a clean JSON 500 instead of
+    an HTML traceback. Known error cases raise HTTPException with a real status."""
+    return JSONResponse(
+        status_code=500,
+        content={"detail": f"Something went wrong on our side ({type(exc).__name__}). "
+                           "Try again; if it persists, check the server log."},
+    )
 
 
 @app.on_event("startup")
@@ -46,7 +57,7 @@ def ingest(source: str):
                 "junkipedia": connectors.fetch_junkipedia,
                 "tipline": connectors.fetch_tipline}
     if source not in fetchers:
-        raise HTTPException(404, "unknown source")
+        raise HTTPException(404, f"Unknown source '{source}'. Available: {', '.join(sorted(fetchers))}.")
     con = db.connect()
     new = 0
     for item in fetchers[source]():
@@ -69,8 +80,8 @@ def ingest(source: str):
 
 
 class TipIn(BaseModel):
-    url: str
-    text: str
+    url: str = Field(min_length=4)
+    text: str = Field(min_length=3)
     note: str | None = None
 
 
@@ -94,8 +105,12 @@ def tipline_submit(tip: TipIn):
 @app.post("/api/pipeline/run")
 def pipeline_run():
     con = db.connect()
+    pending = con.execute("SELECT COUNT(*) c FROM content_items WHERE status='pending'").fetchone()["c"]
     log = pipeline.run_pipeline(con)
     con.close()
+    log["pending_before"] = pending
+    if pending == 0:
+        log["note"] = "Nothing new to process — ingest data first (or submit a tip)."
     return log
 
 
@@ -148,6 +163,13 @@ def opportunities():
 @app.post("/api/opportunities/{opp_id}/claim")
 def claim(opp_id: int):
     con = db.connect()
+    row = con.execute("SELECT status FROM opportunities WHERE id=?", (opp_id,)).fetchone()
+    if not row:
+        con.close()
+        raise HTTPException(404, "Opportunity not found — it may have expired.")
+    if row["status"] != "open":
+        con.close()
+        raise HTTPException(409, "This opportunity was already claimed by someone else.")
     con.execute("UPDATE opportunities SET status='claimed', claimed_by='demo-user', claimed_at=? "
                 "WHERE id=? AND status='open'", (db.now(), opp_id))
     db.audit(con, "demo-user", "opportunity_claimed", {"opportunity": opp_id})

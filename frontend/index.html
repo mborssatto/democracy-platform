@@ -80,6 +80,9 @@
     </nav>
   </header>
   <main>
+    <div v-if="err" class="banner" style="background:var(--red-soft);border-color:#f0caca;color:var(--red)">
+      ⚠ {{ err }} <button class="btn btn-ghost" style="padding:2px 10px;margin-left:8px" @click="err=''">Dismiss</button>
+    </div>
 
     <!-- ═══════════ SETUP / DATA ═══════════ -->
     <div v-if="tab==='setup'">
@@ -101,6 +104,8 @@
         <p class="hint">Six stages: triage → classify → embed → match fact-checks → score → create opportunities.</p>
         <button class="btn btn-teal" @click="runPipeline">Run pipeline</button>
         <div v-if="pipeLog" style="margin-top:12px">
+          <div v-if="pipeLog.note" class="gate" style="background:var(--amber-soft);color:var(--amber)">
+            ℹ {{ pipeLog.note }}</div>
           <div class="gate ok">✔ Kept {{ pipeLog.triage_kept }} relevant posts · dropped {{ pipeLog.triage_dropped }} irrelevant (e.g. the cheesecake recipe)</div>
           <div class="gate ok">✔ Classified {{ pipeLog.classified }} posts into narratives</div>
           <div class="gate ok">✔ Matched {{ pipeLog.claim_matched }} posts to published fact-checks</div>
@@ -251,11 +256,23 @@
 
 <script>
 const { createApp } = Vue;
-const api = (path, opts) => fetch('/api'+path, opts).then(r => r.json());
+const api = async (path, opts) => {
+  let r;
+  try { r = await fetch('/api'+path, opts); }
+  catch (e) { throw new Error('Cannot reach the server — is it still running?'); }
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    const d = body.detail;
+    throw new Error(typeof d === 'string' ? d
+      : Array.isArray(d) ? d.map(x => x.msg).join('; ')
+      : `Request failed (${r.status})`);
+  }
+  return body;
+};
 
 createApp({
   data: () => ({
-    tab: 'setup', lang: 'de',
+    tab: 'setup', lang: 'de', err: '',
     state: { ai_mode: '…', counts: {} },
     radar: [], opps: [], audit: [],
     ingestMsg: '', pipeLog: null,
@@ -272,52 +289,80 @@ createApp({
       return { edit_gate:'Genuine edit', neutrality:'Party neutrality', copypasta:'Not copy-paste',
                dwell_time:'Review time', rate_cap:'Daily cap' }[n] || n;
     },
-    async refreshState() { this.state = await api('/state'); },
-    async ingest(src) {
-      const r = await api('/ingest/'+src, { method:'POST' });
-      this.ingestMsg = `+${r.new_items} new items from ${src}`;
-      this.refreshState();
+    async guard(fn) {
+      // Every user action goes through here: failures become a dismissible
+      // banner instead of a silent console error or a broken view.
+      try { this.err = ''; return await fn(); }
+      catch (e) { this.err = e.message; }
     },
-    async runPipeline() { this.pipeLog = await api('/pipeline/run', { method:'POST' }); this.refreshState(); },
+    async refreshState() { await this.guard(async () => { this.state = await api('/state'); }); },
+    async ingest(src) {
+      await this.guard(async () => {
+        const r = await api('/ingest/'+src, { method:'POST' });
+        this.ingestMsg = `+${r.new_items} new items from ${src}`;
+        this.refreshState();
+      });
+    },
+    async runPipeline() {
+      await this.guard(async () => {
+        this.pipeLog = await api('/pipeline/run', { method:'POST' });
+        this.refreshState();
+      });
+    },
     async submitTip() {
       if (!this.tip.url || !this.tip.text) { this.tipMsg = 'Please fill both fields.'; return; }
-      await api('/tipline', { method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify(this.tip) });
-      this.tipMsg = 'Tip received — run the pipeline to process it.';
-      this.tip = { url:'', text:'' };
+      await this.guard(async () => {
+        await api('/tipline', { method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify(this.tip) });
+        this.tipMsg = 'Tip received — run the pipeline to process it.';
+        this.tip = { url:'', text:'' };
+      });
     },
-    async loadRadar() { this.radar = await api('/radar'); },
-    async loadOpps() { this.opps = await api('/opportunities'); },
-    async loadAudit() { this.audit = await api('/audit'); },
+    async loadRadar() { await this.guard(async () => { this.radar = await api('/radar'); }); },
+    async loadOpps() { await this.guard(async () => { this.opps = await api('/opportunities'); }); },
+    async loadAudit() { await this.guard(async () => { this.audit = await api('/audit'); }); },
     async claimOpp(o) {
-      await api(`/opportunities/${o.id}/claim`, { method:'POST' });
-      const d = await api(`/opportunities/${o.id}/draft`, { method:'POST' });
-      this.activeDraft = d; this.draftText = d.ai_seed;
-      this.gateResult = { checks: [], edit_distance_pct: 0, post_ready: false };
-      this.showPostedForm = false; this.postedMsg = ''; this.copied = false;
+      try {
+        this.err = '';
+        await api(`/opportunities/${o.id}/claim`, { method:'POST' });
+      } catch (e) {
+        this.err = e.message;      // e.g. already claimed by someone else
+        this.loadOpps();           // refresh so the stale card disappears
+        return;
+      }
+      await this.guard(async () => {
+        const d = await api(`/opportunities/${o.id}/draft`, { method:'POST' });
+        this.activeDraft = d; this.draftText = d.ai_seed;
+        this.gateResult = { checks: [], edit_distance_pct: 0, post_ready: false };
+        this.showPostedForm = false; this.postedMsg = ''; this.copied = false;
+      });
     },
     debouncedCheck() {
       clearTimeout(this._debounce);
       this._debounce = setTimeout(() => this.saveDraft(), 700);
     },
     async saveDraft() {
-      this.gateResult = await api(`/drafts/${this.activeDraft.draft_id}`, {
-        method:'PUT', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ text: this.draftText }) });
+      await this.guard(async () => {
+        this.gateResult = await api(`/drafts/${this.activeDraft.draft_id}`, {
+          method:'PUT', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ text: this.draftText }) });
+      });
     },
     async copyText() {
       try { await navigator.clipboard.writeText(this.draftText); this.copied = true;
         setTimeout(()=>this.copied=false, 2000); } catch(e) {}
     },
     async markPosted() {
-      if (!this.postedUrl) return;
-      const r = await fetch(`/api/drafts/${this.activeDraft.draft_id}/mark-posted`, {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ posted_url: this.postedUrl }) });
-      if (r.ok) { this.postedMsg = 'Recorded. The thread will be re-checked at +1h/+24h/+72h (full plan).'; }
-      else { const e = await r.json(); this.postedMsg = 'Error: ' + e.detail; }
+      if (!this.postedUrl) { this.err = 'Paste the link to your posted reply first.'; return; }
+      try {
+        this.err = '';
+        await api(`/drafts/${this.activeDraft.draft_id}/mark-posted`, {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ posted_url: this.postedUrl }) });
+        this.postedMsg = 'Recorded. The thread will be re-checked at +1h/+24h/+72h (full plan).';
+      } catch (e) { this.postedMsg = ''; this.err = e.message; }
     },
-    async makeBrief(code) { this.brief = await api('/briefs/'+code, { method:'POST' }); },
+    async makeBrief(code) { await this.guard(async () => { this.brief = await api('/briefs/'+code, { method:'POST' }); }); },
   },
 }).mount('#app');
 </script>
