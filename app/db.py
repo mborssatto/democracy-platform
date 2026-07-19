@@ -177,6 +177,19 @@ CREATE TABLE IF NOT EXISTS sessions (
     created_at TEXT,
     expires_at TEXT
 );
+
+CREATE TABLE IF NOT EXISTS jobs (
+    id INTEGER PRIMARY KEY,
+    kind TEXT NOT NULL,                  -- 'enrich_item' (only kind for now)
+    payload TEXT NOT NULL,               -- JSON, e.g. {"item_id": 7}
+    status TEXT DEFAULT 'queued',        -- queued | running | done | dead
+    attempts INTEGER DEFAULT 0,
+    max_attempts INTEGER DEFAULT 3,
+    run_after TEXT,                      -- ISO; claimable only when <= now (backoff)
+    last_error TEXT,
+    created_at TEXT,
+    updated_at TEXT
+);
 """
 
 
@@ -224,6 +237,9 @@ class PgConnection:
     def commit(self) -> None:
         self._raw.commit()
 
+    def rollback(self) -> None:
+        self._raw.rollback()
+
     def close(self) -> None:
         self._raw.close()
 
@@ -237,7 +253,10 @@ def connect():
 
         return PgConnection(psycopg.connect(database_url(), row_factory=dict_row))
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    con = sqlite3.connect(DB_PATH)
+    # check_same_thread=False: the background worker (app/worker.py) opens its
+    # connections on its own thread; each connection is still used by one
+    # thread at a time, which is what sqlite actually requires.
+    con = sqlite3.connect(DB_PATH, check_same_thread=False)
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA foreign_keys = ON")
     return con

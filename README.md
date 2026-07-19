@@ -64,10 +64,20 @@ gates (genuine-edit, neutrality, copypasta, review time, rate cap), transparent 
 with the amplification floor, the no-auto-post architecture, the append-only audit log,
 EN/DE translation layer.
 
+**Real (since M3.3):** the job queue — ingestion enqueues one job per item into a
+`jobs` table; a background worker drains it (`FOR UPDATE SKIP LOCKED` on Postgres)
+with retry/backoff and a dead-letter view in the UI. The "Run pipeline" button
+remains as a synchronous drain of the same queue.
+
 **Faked, honestly:** platform data (fixtures), embeddings (word overlap instead of
+<<<<<<< HEAD
 vectors), the job queue (synchronous button instead of workers), auth (local session
 stub with three demo roles — production uses Supabase Auth).
 Each fake is the simplest stand-in with the same interface as the real thing.
+=======
+vectors), auth (single demo user). Each fake is the simplest stand-in with the same
+interface as the real thing.
+>>>>>>> task/m33-worker
 
 ## Repo map
 
@@ -77,6 +87,8 @@ app/
   main.py            FastAPI endpoints
   db.py              SQLite schema (mirrors the plan's tables)
   pipeline.py        the 6 enrichment stages
+  queue.py           job queue (SKIP LOCKED claim, backoff, dead-letter)
+  worker.py          background worker thread + periodic ingest scheduler
   gates.py           the hard gates (edit, neutrality, copypasta, dwell, rate)
   llm.py             AI layer — mock by default, real with a key
   pseudo.py          HMAC pseudonymization + audited re-id vault

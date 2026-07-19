@@ -82,7 +82,7 @@ def test_brief_for_unknown_narrative_404(client):
 def test_unexpected_error_returns_json_500(client, monkeypatch):
     def boom(*a, **k):
         raise RuntimeError("kaboom")
-    monkeypatch.setattr(main.pipeline, "run_pipeline", boom)
+    monkeypatch.setattr(main.queue, "claim_next", boom)
     r = client.post("/api/pipeline/run")
     assert r.status_code == 500
     assert "detail" in r.json()  # JSON body, not an HTML traceback
