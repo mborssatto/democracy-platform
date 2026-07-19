@@ -7,7 +7,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import connectors, db, gates, llm, pipeline, pseudo
+from . import config, connectors, db, gates, llm, pipeline, pseudo
 
 app = FastAPI(title="Democracy Platform — Prototype")
 FRONTEND = Path(__file__).resolve().parent.parent / "frontend"
@@ -47,7 +47,7 @@ def state():
         "posted": con.execute("SELECT COUNT(*) c FROM posted_actions").fetchone()["c"],
     }
     con.close()
-    return {"ai_mode": llm.mode(), "counts": counts}
+    return {"ai_mode": llm.mode(), "counts": counts, "config": config.as_dict()}
 
 
 # ------------------------------------------------------------------ ingestion

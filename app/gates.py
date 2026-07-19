@@ -7,7 +7,7 @@ the evidence chain that a human genuinely controlled the content.
 import re
 import time
 
-from . import llm
+from . import config, llm
 
 # --- edit distance ------------------------------------------------------------
 
@@ -48,21 +48,26 @@ def neutrality_check(text: str) -> tuple[bool, str]:
     return True, "No electoral asks or party references."
 
 
-def copypasta_check(text: str, recent_posted_texts: list[str]) -> tuple[bool, str]:
+def copypasta_check(text: str, recent_posted_texts: list[str],
+                    threshold: float | None = None) -> tuple[bool, str]:
     """Near-identical texts from many accounts = what platforms ban as coordination.
     Prototype metric: word-set Jaccard similarity (plan: embedding cosine, flag-for-review)."""
+    if threshold is None:
+        threshold = config.COPYPASTA_JACCARD_THRESHOLD
     words = set(text.lower().split())
     for other in recent_posted_texts:
         ow = set(other.lower().split())
         if not words or not ow:
             continue
         jaccard = len(words & ow) / len(words | ow)
-        if jaccard >= 0.85:
+        if jaccard >= threshold:
             return False, f"Too similar ({jaccard:.0%}) to a reply another member already posted."
     return True, "Distinct from recent community replies."
 
 
-def edit_gate(seed: str, current: str, min_pct: float = 15.0) -> tuple[bool, str, float]:
+def edit_gate(seed: str, current: str, min_pct: float | None = None) -> tuple[bool, str, float]:
+    if min_pct is None:
+        min_pct = config.EDIT_GATE_MIN_PCT
     dist = token_edit_distance_pct(seed, current)
     if dist < min_pct:
         return False, f"Only {dist}% changed (minimum {min_pct}%). Make it yours.", dist
@@ -72,7 +77,9 @@ def edit_gate(seed: str, current: str, min_pct: float = 15.0) -> tuple[bool, str
     return True, f"{dist}% changed; substantive rework confirmed.", dist
 
 
-def dwell_check(draft_created_at: str, min_seconds: int = 60) -> tuple[bool, str]:
+def dwell_check(draft_created_at: str, min_seconds: int | None = None) -> tuple[bool, str]:
+    if min_seconds is None:
+        min_seconds = config.DWELL_MIN_SECONDS
     created = time.mktime(time.strptime(draft_created_at, "%Y-%m-%dT%H:%M:%S"))
     elapsed = int(time.time() - created)
     if elapsed < min_seconds:
@@ -80,7 +87,9 @@ def dwell_check(draft_created_at: str, min_seconds: int = 60) -> tuple[bool, str
     return True, f"{elapsed}s review time."
 
 
-def rate_cap_check(posted_today: int, cap: int = 5) -> tuple[bool, str]:
+def rate_cap_check(posted_today: int, cap: int | None = None) -> tuple[bool, str]:
+    if cap is None:
+        cap = config.RATE_CAP_PER_DAY
     if posted_today >= cap:
         return False, f"Daily cap reached ({cap} replies/day). Quality over volume — see you tomorrow."
     return True, f"{posted_today}/{cap} replies used today."
