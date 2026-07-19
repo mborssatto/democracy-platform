@@ -73,6 +73,61 @@ def _real_json(system: str, user: str) -> dict:
     return json.loads(match.group(0)) if match else {}
 
 
+# ------------------------------------------------------------------ embeddings
+# Real embedding vectors for claim matching (pipeline stages 3+4). Separate
+# from mode(): embeddings need their own key (OpenAI or Voyage), read at call
+# time — like factcheck.api_key() — so tests can control the environment.
+
+EMBED_MODELS = {
+    "openai": "text-embedding-3-small",   # ≈ $0.02 / 1M tokens
+    "voyage": "voyage-3.5-lite",
+}
+
+
+def embedding_model() -> str | None:
+    """The active embedding model, or None when no embedding key is configured
+    (mock mode) — callers fall back to word-overlap matching. Prefer OpenAI
+    when both keys are present."""
+    if os.environ.get("OPENAI_API_KEY"):
+        return EMBED_MODELS["openai"]
+    if os.environ.get("VOYAGE_API_KEY"):
+        return EMBED_MODELS["voyage"]
+    return None
+
+
+def embed_texts(texts: list[str], transport: httpx.BaseTransport | None = None
+                ) -> list[list[float]] | None:
+    """Embed a batch of texts in ONE API call (cost discipline: never loop
+    per-text). Returns one vector per input text, in order, or None when no
+    embedding key is configured.
+
+    PSEUDONYMIZATION INVARIANT (hard rule 5): every text passed here must
+    already be pseudonymized — post/claim text only. Never send author fields;
+    the canary test (tests/test_pipeline.py) enforces the storage side.
+
+    `transport` lets tests inject an httpx.MockTransport — no network needed.
+    """
+    openai_key = os.environ.get("OPENAI_API_KEY")
+    voyage_key = os.environ.get("VOYAGE_API_KEY")
+    if not (openai_key or voyage_key):
+        return None
+    if not texts:
+        return []
+    if openai_key:  # preferred when both keys are present
+        url = "https://api.openai.com/v1/embeddings"
+        headers = {"Authorization": f"Bearer {openai_key}"}
+        model = EMBED_MODELS["openai"]
+    else:
+        url = "https://api.voyageai.com/v1/embeddings"
+        headers = {"Authorization": f"Bearer {voyage_key}"}
+        model = EMBED_MODELS["voyage"]
+    with httpx.Client(transport=transport, timeout=60) as client:
+        r = client.post(url, headers=headers, json={"model": model, "input": texts})
+        r.raise_for_status()
+        data = sorted(r.json()["data"], key=lambda d: d.get("index", 0))
+        return [d["embedding"] for d in data]
+
+
 # ------------------------------------------------------------------- functions
 # Each function: same signature and return shape in mock and real mode.
 

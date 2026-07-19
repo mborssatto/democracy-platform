@@ -43,7 +43,7 @@ CREATE TABLE IF NOT EXISTS narratives (
 CREATE TABLE IF NOT EXISTS enrichments (
     id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     item_id bigint NOT NULL,
-    stage text NOT NULL,                 -- triage | classify | claim_match | score
+    stage text NOT NULL,                 -- triage | classify | embed | claim_match | score
     output_json text NOT NULL,
     model text,
     created_at text,
@@ -62,6 +62,17 @@ CREATE TABLE IF NOT EXISTS claims (
     published_at text,
     snapshot_json text,                  -- full local copy of the source record
     source text                          -- mock | google_factcheck
+);
+
+CREATE TABLE IF NOT EXISTS claim_embeddings (
+    -- Cached claim vectors (M4.3). Only claims are cached — they are the
+    -- stable corpus; item vectors live in memory for one pipeline run.
+    -- vector_json = JSON array of floats; cosine happens in Python, which is
+    -- honest at this corpus size (plan: a pgvector column here at scale).
+    claim_id bigint PRIMARY KEY,
+    model text,                          -- e.g. text-embedding-3-small
+    vector_json text,
+    created_at text
 );
 
 CREATE TABLE IF NOT EXISTS claim_matches (
