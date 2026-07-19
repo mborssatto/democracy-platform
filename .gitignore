@@ -12,3 +12,4 @@ node_modules/
 .nuxt/
 frontend-nuxt/.output/
 frontend-nuxt/dist
+.claude/
