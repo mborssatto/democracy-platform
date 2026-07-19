@@ -278,6 +278,9 @@ def connect():
     con = sqlite3.connect(DB_PATH, check_same_thread=False)
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA foreign_keys = ON")
+    # With the background worker on, HTTP writes and worker writes can collide;
+    # wait briefly for the lock instead of failing with "database is locked".
+    con.execute("PRAGMA busy_timeout = 5000")
     return con
 
 
