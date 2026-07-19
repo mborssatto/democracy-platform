@@ -2,16 +2,24 @@
 import json
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import config, connectors, db, factcheck, gates, llm, pipeline, pseudo
+from . import auth, config, connectors, db, factcheck, gates, llm, pipeline, pseudo
 
 app = FastAPI(title="Democracy Platform — Prototype")
 FRONTEND = Path(__file__).resolve().parent.parent / "frontend"
 app.mount("/static", StaticFiles(directory=FRONTEND), name="static")
+app.include_router(auth.router)  # POST /api/login, /api/logout (dev auth stub)
+
+# Route guards (auth stub — see app/auth.py for the production Supabase swap):
+#   public          GET /, /static, POST /api/login, GET /api/state
+#   admin+staff     Radar, audit log, briefs, fact-check sync, ingestion, pipeline
+#   any logged-in   tipline, Respond flow (responders scoped to their own claims)
+STAFF = Depends(auth.require_role("admin", "staff"))
+ANY_USER = Depends(auth.get_user)
 
 
 @app.exception_handler(Exception)
@@ -30,6 +38,7 @@ def startup() -> None:
     db.init_db()
     con = db.connect()
     pipeline.seed_reference_data(con)
+    auth.seed_demo_users(con)
     con.close()
 
 
@@ -39,7 +48,9 @@ def index():
 
 
 @app.get("/api/state")
-def state():
+def state(user: dict | None = Depends(auth.get_user_optional)):
+    """Public, but echoes the logged-in user when a valid token is presented —
+    the frontend uses this to restore a stored session on page load."""
     con = db.connect()
     counts = {
         "items": con.execute("SELECT COUNT(*) c FROM content_items").fetchone()["c"],
@@ -47,12 +58,13 @@ def state():
         "posted": con.execute("SELECT COUNT(*) c FROM posted_actions").fetchone()["c"],
     }
     con.close()
-    return {"ai_mode": llm.mode(), "counts": counts, "config": config.as_dict()}
+    return {"ai_mode": llm.mode(), "counts": counts, "config": config.as_dict(),
+            "user": {"username": user["username"], "role": user["role"]} if user else None}
 
 
 # ------------------------------------------------------------------ ingestion
 @app.post("/api/ingest/{source}")
-def ingest(source: str):
+def ingest(source: str, user: dict = STAFF):
     fetchers = {"tiktok": connectors.fetch_tiktok,
                 "junkipedia": connectors.fetch_junkipedia,
                 "tipline": connectors.fetch_tipline}
@@ -87,7 +99,7 @@ class TipIn(BaseModel):
 
 
 @app.post("/api/tipline")
-def tipline_submit(tip: TipIn):
+def tipline_submit(tip: TipIn, user: dict = ANY_USER):
     """The tipline is a REAL feature (no external integration needed)."""
     con = db.connect()
     pseudo_id = pseudo.pseudonymize("tipline:" + tip.url)
@@ -103,7 +115,7 @@ def tipline_submit(tip: TipIn):
 
 
 @app.post("/api/sync/factchecks")
-def sync_factchecks():
+def sync_factchecks(user: dict = STAFF):
     """Sync published fact-checks from the Google Fact Check Tools API into the
     `claims` table (real mode needs FACTCHECK_API_KEY; otherwise mock fallback).
     We only ever INGEST published verdicts — never generate them (hard rule #3)."""
@@ -115,7 +127,7 @@ def sync_factchecks():
 
 # ------------------------------------------------------------------ pipeline
 @app.post("/api/pipeline/run")
-def pipeline_run():
+def pipeline_run(user: dict = STAFF):
     con = db.connect()
     try:
         pending = con.execute("SELECT COUNT(*) c FROM content_items WHERE status='pending'").fetchone()["c"]
@@ -131,7 +143,7 @@ def pipeline_run():
 
 # ------------------------------------------------------------------ radar
 @app.get("/api/radar")
-def radar():
+def radar(user: dict = STAFF):
     con = db.connect()
     narratives = []
     for n in con.execute("SELECT * FROM narratives").fetchall():
@@ -159,24 +171,31 @@ def radar():
 
 # ------------------------------------------------------------------ opportunities
 @app.get("/api/opportunities")
-def opportunities():
-    con = db.connect()
-    rows = con.execute(
-        """SELECT o.*, ci.text, ci.text_en, ci.url item_url, ci.views, ci.platform,
+def opportunities(user: dict = ANY_USER):
+    """Staff/admin see every open+claimed opportunity; responders see open ones
+    plus ONLY the ones they claimed themselves (data scoping)."""
+    base = """SELECT o.*, ci.text, ci.text_en, ci.url item_url, ci.views, ci.platform,
                   ci.author_followers_band,
                   cm.claim_id, cl.fact_checker, cl.verdict, cl.url fc_url, cl.claim_en
            FROM opportunities o
            JOIN content_items ci ON ci.id=o.item_id
            LEFT JOIN claim_matches cm ON cm.item_id=ci.id
            LEFT JOIN claims cl ON cl.id=cm.claim_id
-           WHERE o.status IN ('open','claimed')
-           ORDER BY o.score DESC""").fetchall()
+           WHERE {scope}
+           ORDER BY o.score DESC"""
+    con = db.connect()
+    if user["role"] == "responder":
+        rows = con.execute(
+            base.format(scope="(o.status='open' OR (o.status='claimed' AND o.claimed_by=?))"),
+            (user["username"],)).fetchall()
+    else:
+        rows = con.execute(base.format(scope="o.status IN ('open','claimed')")).fetchall()
     con.close()
     return [dict(r) for r in rows]
 
 
 @app.post("/api/opportunities/{opp_id}/claim")
-def claim(opp_id: int):
+def claim(opp_id: int, user: dict = ANY_USER):
     con = db.connect()
     row = con.execute("SELECT status FROM opportunities WHERE id=?", (opp_id,)).fetchone()
     if not row:
@@ -185,15 +204,26 @@ def claim(opp_id: int):
     if row["status"] != "open":
         con.close()
         raise HTTPException(409, "This opportunity was already claimed by someone else.")
-    con.execute("UPDATE opportunities SET status='claimed', claimed_by='demo-user', claimed_at=? "
-                "WHERE id=? AND status='open'", (db.now(), opp_id))
-    db.audit(con, "demo-user", "opportunity_claimed", {"opportunity": opp_id})
+    con.execute("UPDATE opportunities SET status='claimed', claimed_by=?, claimed_at=? "
+                "WHERE id=? AND status='open'", (user["username"], db.now(), opp_id))
+    db.audit(con, user["username"], "opportunity_claimed", {"opportunity": opp_id})
     con.commit(); con.close()
     return {"ok": True}
 
 
+def _guard_responder_owns(con, user: dict, opp_id: int | None, draft_id: int | None = None) -> None:
+    """Data scoping: a responder may only touch drafts/opportunities they
+    claimed themselves. Staff/admin pass through. Raises an audited 403."""
+    if user["role"] != "responder":
+        return
+    owner = con.execute("SELECT claimed_by FROM opportunities WHERE id=?", (opp_id,)).fetchone()
+    if not owner or owner["claimed_by"] != user["username"]:
+        auth.deny_scoped(con, user, "draft_scope",
+                         {"opportunity": opp_id, "draft": draft_id})
+
+
 @app.post("/api/opportunities/{opp_id}/draft")
-def create_draft(opp_id: int):
+def create_draft(opp_id: int, user: dict = ANY_USER):
     con = db.connect()
     row = con.execute(
         """SELECT o.id, ci.text, cl.fact_checker, cl.verdict, cl.url, cl.claim_en
@@ -203,6 +233,7 @@ def create_draft(opp_id: int):
     if not row:
         con.close()
         raise HTTPException(404, "opportunity not found")
+    _guard_responder_owns(con, user, opp_id)
     fc = {"fact_checker": row["fact_checker"], "verdict": row["verdict"], "url": row["url"]} \
         if row["fact_checker"] else None
     seed = llm.draft_reply(row["text"], fc)
@@ -222,13 +253,14 @@ class DraftUpdate(BaseModel):
 
 
 @app.put("/api/drafts/{draft_id}")
-def update_draft(draft_id: int, body: DraftUpdate):
+def update_draft(draft_id: int, body: DraftUpdate, user: dict = ANY_USER):
     """Save a human revision and evaluate every gate. Returns full gate status."""
     con = db.connect()
     d = con.execute("SELECT * FROM drafts WHERE id=?", (draft_id,)).fetchone()
     if not d:
         con.close()
         raise HTTPException(404, "draft not found")
+    _guard_responder_owns(con, user, d["opportunity_id"], draft_id)
 
     dist = gates.token_edit_distance_pct(d["ai_seed"], body.text)
     con.execute("UPDATE drafts SET current_text=? WHERE id=?", (body.text, draft_id))
@@ -259,7 +291,7 @@ def update_draft(draft_id: int, body: DraftUpdate):
     all_ok = all(ok for _, ok, _ in checks)
     con.execute("UPDATE drafts SET status=? WHERE id=?",
                 ("post_ready" if all_ok else "editing", draft_id))
-    db.audit(con, "demo-user", "gates_evaluated",
+    db.audit(con, user["username"], "gates_evaluated",
              {"draft": draft_id, "passed": all_ok, "edit_distance_pct": dist})
     con.commit(); con.close()
     return {
@@ -274,7 +306,7 @@ class PostedIn(BaseModel):
 
 
 @app.post("/api/drafts/{draft_id}/mark-posted")
-def mark_posted(draft_id: int, body: PostedIn):
+def mark_posted(draft_id: int, body: PostedIn, user: dict = ANY_USER):
     """The human posted it themselves; they report the URL back. The platform
     itself NEVER posts — there is deliberately no code path that could."""
     con = db.connect()
@@ -282,6 +314,7 @@ def mark_posted(draft_id: int, body: PostedIn):
     if not d:
         con.close()
         raise HTTPException(404, "draft not found")
+    _guard_responder_owns(con, user, d["opportunity_id"], draft_id)
     if d["status"] != "post_ready":
         con.close()
         raise HTTPException(409, "draft has not passed all gates")
@@ -290,14 +323,14 @@ def mark_posted(draft_id: int, body: PostedIn):
     con.execute("UPDATE drafts SET status='posted' WHERE id=?", (draft_id,))
     con.execute("UPDATE opportunities SET status='posted' "
                 "WHERE id=(SELECT opportunity_id FROM drafts WHERE id=?)", (draft_id,))
-    db.audit(con, "demo-user", "marked_posted", {"draft": draft_id, "url": body.posted_url})
+    db.audit(con, user["username"], "marked_posted", {"draft": draft_id, "url": body.posted_url})
     con.commit(); con.close()
     return {"ok": True}
 
 
 # ------------------------------------------------------------------ studio
 @app.post("/api/briefs/{narrative_code}")
-def make_brief(narrative_code: str):
+def make_brief(narrative_code: str, user: dict = STAFF):
     con = db.connect()
     n = con.execute("SELECT * FROM narratives WHERE code=?", (narrative_code,)).fetchone()
     if not n:
@@ -311,14 +344,14 @@ def make_brief(narrative_code: str):
            WHERE {db.sql_json_extract('e.output_json', 'narrative')}=? LIMIT 3""",
         (narrative_code,)).fetchall()]
     brief = llm.draft_brief(dict(n), claims, examples)
-    db.audit(con, "demo-user", "brief_generated", {"narrative": narrative_code})
+    db.audit(con, user["username"], "brief_generated", {"narrative": narrative_code})
     con.commit(); con.close()
     return {"narrative": dict(n), "brief": brief, "factchecks": claims}
 
 
 # ------------------------------------------------------------------ audit
 @app.get("/api/audit")
-def audit_view():
+def audit_view(user: dict = STAFF):
     con = db.connect()
     rows = con.execute("SELECT * FROM audit_log ORDER BY id DESC LIMIT 100").fetchall()
     con.close()

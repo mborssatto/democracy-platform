@@ -109,6 +109,8 @@ def client(fresh_db, monkeypatch):
     pipeline.seed_reference_data(con)
     con.close()
     with TestClient(main.app, raise_server_exceptions=False) as c:
+        from conftest import login_headers
+        c.headers.update(login_headers(c, "staff"))  # sync endpoint is staff-only (M3.2)
         yield c
 
 

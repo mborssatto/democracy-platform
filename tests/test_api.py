@@ -4,6 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app import db, main, pipeline
+from conftest import login_headers
 
 
 @pytest.fixture()
@@ -12,6 +13,8 @@ def client(fresh_db):
     pipeline.seed_reference_data(con)
     con.close()
     with TestClient(main.app, raise_server_exceptions=False) as c:
+        # Endpoints require auth since M3.2 — run this suite as staff.
+        c.headers.update(login_headers(c, "staff"))
         yield c
 
 

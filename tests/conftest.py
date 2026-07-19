@@ -10,6 +10,14 @@ import pytest
 from app import db
 
 
+def login_headers(client, username: str) -> dict:
+    """Log a demo user in through the API (auth stub: username IS the
+    credential) and return the Authorization header to send with requests."""
+    r = client.post("/api/login", json={"username": username})
+    assert r.status_code == 200, r.text
+    return {"Authorization": f"Bearer {r.json()['token']}"}
+
+
 def wipe_postgres() -> None:
     """Drop and recreate the public schema — a clean slate between tests."""
     con = db.connect()

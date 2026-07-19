@@ -17,6 +17,11 @@ python run.py
 # open http://localhost:8400
 ```
 
+Log in with one of the three demo users — **admin**, **staff**, or **responder**
+(one click, no passwords: it's a dev auth stub, swapped for Supabase Auth in
+production — see `docs/integrations/supabase.md`). Responders only get the
+Respond flow, scoped to their own claimed opportunities; admin/staff see everything.
+
 Optional: `cp .env.example .env` and add an `ANTHROPIC_API_KEY` (or `OPENAI_API_KEY`)
 to switch every AI step from mock to a real model. Nothing else changes.
 
@@ -60,7 +65,8 @@ with the amplification floor, the no-auto-post architecture, the append-only aud
 EN/DE translation layer.
 
 **Faked, honestly:** platform data (fixtures), embeddings (word overlap instead of
-vectors), the job queue (synchronous button instead of workers), auth (single demo user).
+vectors), the job queue (synchronous button instead of workers), auth (local session
+stub with three demo roles — production uses Supabase Auth).
 Each fake is the simplest stand-in with the same interface as the real thing.
 
 ## Repo map
