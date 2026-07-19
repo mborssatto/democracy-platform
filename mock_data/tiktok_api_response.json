@@ -1,0 +1,49 @@
+{
+  "data": {
+    "videos": [
+      {
+        "id": 7301112223334445001,
+        "username": "patriot_klartext_88",
+        "create_time": 1783966920,
+        "region_code": "DE",
+        "video_description": "Die Briefwahl ist das größte Einfallstor für Wahlbetrug! Stimmzettel verschwinden, werden gefälscht... und keiner kontrolliert es. Teilt das, bevor es gelöscht wird! #briefwahl #wahlbetrug #deutschland",
+        "like_count": 21500,
+        "comment_count": 3400,
+        "share_count": 8900,
+        "view_count": 184000,
+        "hashtag_names": ["briefwahl", "wahlbetrug", "deutschland"]
+      },
+      {
+        "id": 7301112223334445002,
+        "username": "wahrheit_ungefiltert",
+        "create_time": 1784020200,
+        "region_code": "DE",
+        "video_description": "Mein Opa bekommt 890€ Rente. Asylbewerber bekommen über 1500€ plus Wohnung. Das ist die Wahrheit die keiner sagen darf! #rentner #sozialleistungen #ungerecht",
+        "like_count": 14800,
+        "comment_count": 2900,
+        "share_count": 5100,
+        "view_count": 96000,
+        "hashtag_names": ["rentner", "sozialleistungen"]
+      },
+      {
+        "id": 7301112223334445008,
+        "username": "buerger_stimme_nord",
+        "create_time": 1784056800,
+        "region_code": "DE",
+        "video_description": "Nochmal zur Briefwahl: In meinem Wahllokal wurden 2021 Säcke mit Stimmzetteln gefunden. Wahlbetrug ist real, die Briefwahl gehört abgeschafft! #briefwahl #wahlbetrug",
+        "like_count": 1900,
+        "comment_count": 410,
+        "share_count": 700,
+        "view_count": 15000,
+        "hashtag_names": ["briefwahl", "wahlbetrug"]
+      }
+    ],
+    "cursor": 100,
+    "has_more": false
+  },
+  "error": {
+    "code": "ok",
+    "message": "",
+    "log_id": "20260720123456ABCDEF"
+  }
+}

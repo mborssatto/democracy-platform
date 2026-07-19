@@ -15,6 +15,8 @@ The tipline is NOT mocked — it's our own feature and fully works.
 import json
 from pathlib import Path
 
+from . import tiktok_client
+
 MOCK_DIR = Path(__file__).resolve().parent.parent / "mock_data"
 
 
@@ -33,6 +35,8 @@ def fetch_tiktok() -> list[dict]:
                            {"operation":"EQ","field_name":"region_code","field_values":["DE"]}]},
          "start_date":"20260701","end_date":"20260715","max_count":100}
     """
+    if tiktok_client.enabled():  # real API once TIKTOK_CLIENT_KEY/SECRET are set
+        return tiktok_client.fetch_real()
     raw = _load("tiktok_videos.json")
     return [
         {
