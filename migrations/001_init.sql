@@ -122,3 +122,20 @@ CREATE TABLE IF NOT EXISTS audit_log (
     id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     actor text, action text, detail text, created_at text
 );
+
+CREATE TABLE IF NOT EXISTS users (
+    -- Auth stub (M3.2): three demo users, no passwords. Production: Supabase
+    -- Auth owns identities; this becomes a profiles table keyed by auth uid.
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    username text UNIQUE NOT NULL,
+    role text NOT NULL CHECK (role IN ('admin','staff','responder')),
+    created_at text
+);
+
+CREATE TABLE IF NOT EXISTS sessions (
+    -- Dev-only bearer tokens (24h). Production: Supabase JWTs, no table needed.
+    token text PRIMARY KEY,
+    user_id bigint NOT NULL,
+    created_at text,
+    expires_at text
+);

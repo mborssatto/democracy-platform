@@ -49,6 +49,19 @@ docker run -d --name dp-postgres -p 54329:5432 \
 DB_BACKEND=postgres python -m pytest tests/ -q
 ```
 
+## Auth swap (production replaces the M3.2 stub)
+
+The prototype's login (`app/auth.py`) is a dev-only stub: three seeded demo
+users, the username doubling as the credential, and random bearer tokens in a
+`sessions` table. In production, Supabase Auth takes over: users sign in with
+email/SSO and Supabase issues a **JWT**. `get_user()` then verifies that JWT
+with the project's JWT secret instead of looking tokens up in `sessions`
+(which disappears, along with `/api/login`). Roles move to a `profiles` table
+keyed by the auth user id (or `user_metadata`). As defense-in-depth, Row Level
+Security re-enforces the same scoping in the database itself — e.g. responders
+can only SELECT/UPDATE their own claimed opportunities — per plan Ch 8.2. The
+route guards in `app/main.py` stay unchanged.
+
 ## What Supabase adds beyond the database
 
 Auth (login for volunteers/staff), Row Level Security (per-tier access rules

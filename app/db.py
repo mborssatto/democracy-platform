@@ -149,6 +149,23 @@ CREATE TABLE IF NOT EXISTS audit_log (
     id INTEGER PRIMARY KEY,
     actor TEXT, action TEXT, detail TEXT, created_at TEXT
 );
+
+CREATE TABLE IF NOT EXISTS users (
+    -- Auth stub (M3.2): three demo users, no passwords. Production: Supabase
+    -- Auth owns identities; this becomes a profiles table keyed by auth uid.
+    id INTEGER PRIMARY KEY,
+    username TEXT UNIQUE NOT NULL,
+    role TEXT NOT NULL CHECK (role IN ('admin','staff','responder')),
+    created_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS sessions (
+    -- Dev-only bearer tokens (24h). Production: Supabase JWTs, no table needed.
+    token TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL,
+    created_at TEXT,
+    expires_at TEXT
+);
 """
 
 

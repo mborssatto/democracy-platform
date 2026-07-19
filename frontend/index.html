@@ -71,19 +71,43 @@
     <button class="lang" @click="lang = lang==='de' ? 'en' : 'de'">
       {{ lang==='de' ? '🇬🇧 View in English' : '🇩🇪 Original (Deutsch)' }}
     </button>
-    <nav>
-      <button :class="{active:tab==='setup'}" @click="tab='setup'">⚙️ Data</button>
-      <button :class="{active:tab==='radar'}" @click="tab='radar';loadRadar()">📡 Radar</button>
+    <nav v-if="session">
+      <!-- Responders only get the Respond flow; the other tabs are staff/admin
+           (the API enforces this server-side too — hiding is just UX). -->
+      <template v-if="session.role!=='responder'">
+        <button :class="{active:tab==='setup'}" @click="tab='setup'">⚙️ Data</button>
+        <button :class="{active:tab==='radar'}" @click="tab='radar';loadRadar()">📡 Radar</button>
+      </template>
       <button :class="{active:tab==='respond'}" @click="tab='respond';loadOpps()">💬 Respond</button>
-      <button :class="{active:tab==='studio'}" @click="tab='studio';loadRadar()">🎨 Studio</button>
-      <button :class="{active:tab==='audit'}" @click="tab='audit';loadAudit()">📋 Audit</button>
+      <template v-if="session.role!=='responder'">
+        <button :class="{active:tab==='studio'}" @click="tab='studio';loadRadar()">🎨 Studio</button>
+        <button :class="{active:tab==='audit'}" @click="tab='audit';loadAudit()">📋 Audit</button>
+      </template>
     </nav>
+    <span v-if="session" class="meta" style="margin-left:auto;white-space:nowrap">
+      logged in as <b>{{ session.username }}</b> ({{ session.role }}) ·
+      <a href="#" @click.prevent="logout" style="color:var(--blue)">logout</a>
+    </span>
   </header>
   <main>
     <div v-if="err" class="banner" style="background:var(--red-soft);border-color:#f0caca;color:var(--red)">
       ⚠ {{ err }} <button class="btn btn-ghost" style="padding:2px 10px;margin-left:8px" @click="err=''">Dismiss</button>
     </div>
 
+    <!-- ═══════════ LOGIN (dev auth stub) ═══════════ -->
+    <div v-if="!session" class="card" style="max-width:520px;margin:40px auto">
+      <h2>🔐 Log in</h2>
+      <p class="hint">Dev stub: pick a demo user — no passwords exist in this prototype.
+        Production replaces this with Supabase Auth (real accounts + JWTs).
+        Responders only see the Respond flow, scoped to their own claims.</p>
+      <div class="row">
+        <button class="btn btn-blue" @click="loginAs('admin')">Enter as admin</button>
+        <button class="btn btn-teal" @click="loginAs('staff')">Enter as staff</button>
+        <button class="btn btn-ghost" @click="loginAs('responder')">Enter as responder</button>
+      </div>
+    </div>
+
+    <template v-if="session">
     <!-- ═══════════ SETUP / DATA ═══════════ -->
     <div v-if="tab==='setup'">
       <div class="banner">Mock mode: platform integrations are simulated with realistic fixture data.
@@ -263,27 +287,36 @@
       copypasta ≥{{ Math.round(state.config.copypasta_jaccard_threshold * 100) }}% ·
       expiry {{ state.config.opportunity_expiry_hours }}h
     </p>
+    </template>
   </main>
 </div>
 
 <script>
 const { createApp } = Vue;
+const loadSession = () => JSON.parse(localStorage.getItem('dp_session') || 'null');
 const api = async (path, opts) => {
+  opts = opts || {};
+  opts.headers = Object.assign({}, opts.headers);
+  const s = loadSession();
+  if (s && s.token) opts.headers['Authorization'] = 'Bearer ' + s.token;  // dev stub token
   let r;
   try { r = await fetch('/api'+path, opts); }
   catch (e) { throw new Error('Cannot reach the server — is it still running?'); }
   const body = await r.json().catch(() => ({}));
   if (!r.ok) {
     const d = body.detail;
-    throw new Error(typeof d === 'string' ? d
+    const err = new Error(typeof d === 'string' ? d
       : Array.isArray(d) ? d.map(x => x.msg).join('; ')
       : `Request failed (${r.status})`);
+    err.status = r.status;
+    throw err;
   }
   return body;
 };
 
 createApp({
   data: () => ({
+    session: loadSession(),   // {token, username, role} from the dev auth stub
     tab: 'setup', lang: 'de', err: '',
     state: { ai_mode: '…', counts: {} },
     radar: [], opps: [], audit: [],
@@ -294,9 +327,28 @@ createApp({
     brief: null,
     _debounce: null,
   }),
-  mounted() { this.refreshState(); },
+  mounted() {
+    if (this.session && this.session.role === 'responder') { this.tab = 'respond'; this.loadOpps(); }
+    this.refreshState();
+  },
   methods: {
     fmt(n) { return n >= 1000 ? (n/1000).toFixed(n>=100000?0:1) + 'k' : n; },
+    clearSession() { this.session = null; localStorage.removeItem('dp_session'); this.tab = 'setup'; },
+    async loginAs(username) {
+      await this.guard(async () => {
+        const r = await api('/login', { method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ username }) });
+        this.session = { token: r.token, username: r.username, role: r.role };
+        localStorage.setItem('dp_session', JSON.stringify(this.session));
+        if (r.role === 'responder') { this.tab = 'respond'; this.loadOpps(); }
+        else this.tab = 'setup';
+        this.refreshState();
+      });
+    },
+    async logout() {
+      try { await api('/logout', { method:'POST' }); } catch (e) {} // best effort
+      this.clearSession();
+    },
     gateLabel(n) {
       return { edit_gate:'Genuine edit', neutrality:'Party neutrality', copypasta:'Not copy-paste',
                dwell_time:'Review time', rate_cap:'Daily cap' }[n] || n;
@@ -305,9 +357,20 @@ createApp({
       // Every user action goes through here: failures become a dismissible
       // banner instead of a silent console error or a broken view.
       try { this.err = ''; return await fn(); }
-      catch (e) { this.err = e.message; }
+      catch (e) { this.fail(e); }
     },
-    async refreshState() { await this.guard(async () => { this.state = await api('/state'); }); },
+    fail(e) {
+      this.err = e.message;
+      if (e.status === 401) { this.clearSession(); this.err = 'Session expired — please log in again.'; }
+    },
+    async refreshState() {
+      await this.guard(async () => {
+        this.state = await api('/state');
+        // /api/state echoes the user for a valid token; a stored token the
+        // server no longer recognizes (restart, expiry) means log in again.
+        if (this.session && !this.state.user) this.clearSession();
+      });
+    },
     async ingest(src) {
       await this.guard(async () => {
         const r = await api('/ingest/'+src, { method:'POST' });
@@ -346,7 +409,7 @@ createApp({
         this.err = '';
         await api(`/opportunities/${o.id}/claim`, { method:'POST' });
       } catch (e) {
-        this.err = e.message;      // e.g. already claimed by someone else
+        this.fail(e);              // e.g. already claimed by someone else
         this.loadOpps();           // refresh so the stale card disappears
         return;
       }
@@ -380,7 +443,7 @@ createApp({
           method:'POST', headers:{'Content-Type':'application/json'},
           body: JSON.stringify({ posted_url: this.postedUrl }) });
         this.postedMsg = 'Recorded. The thread will be re-checked at +1h/+24h/+72h (full plan).';
-      } catch (e) { this.postedMsg = ''; this.err = e.message; }
+      } catch (e) { this.postedMsg = ''; this.fail(e); }
     },
     async makeBrief(code) { await this.guard(async () => { this.brief = await api('/briefs/'+code, { method:'POST' }); }); },
   },
