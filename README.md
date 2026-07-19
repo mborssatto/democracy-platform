@@ -79,7 +79,18 @@ frontend/index.html  single-page Vue app (vendored Vue, no build step)
 mock_data/           realistic fixtures in real-API shapes
 docs/integrations/   step-by-step guide per integration
 tests/               gates + pipeline + pseudonymization canary
+evals/               golden set + eval runner for the AI stages
 ```
+
+## Evals
+
+`evals/golden_set.json` is a fixed, hand-labeled sample of German posts — real
+narrative examples, harmless decoys, and borderline cases — that acts as an answer
+key for the AI triage and classify stages. Run `python evals/run_evals.py` to score
+the current prompts (mock heuristics offline, the real model with an API key) and
+get precision/recall per narrative; CI runs it on every push and fails if scores
+drop below the thresholds. Each report is stamped with the prompt version, so you
+can tell whether a prompt change made the AI better or worse.
 
 ## Learn how systems like this work
 

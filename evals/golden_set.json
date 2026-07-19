@@ -1,0 +1,258 @@
+{
+  "version": "v1",
+  "description": "Golden set for the triage + classify stages. Hand-labeled German social-media-style posts: ~6 per tracked narrative (mixing keyword-heavy phrasing with paraphrases that avoid the exact keywords), 8 irrelevant decoys, and 4 borderline posts that are political but match no tracked narrative. label_relevant feeds the triage metrics; label_narrative feeds the classify metrics ('none' is its own class).",
+  "entries": [
+    {
+      "id": "g001",
+      "text": "Die Briefwahl ist das perfekte Einfallstor für Wahlbetrug – niemand kontrolliert, wer die Umschläge wirklich ausfüllt!",
+      "label_relevant": true,
+      "label_narrative": "briefwahl_betrug"
+    },
+    {
+      "id": "g002",
+      "text": "Tausende Stimmzettel einfach im Müll gefunden. Und das soll Zufall sein? #Wahlfälschung",
+      "label_relevant": true,
+      "label_narrative": "briefwahl_betrug"
+    },
+    {
+      "id": "g003",
+      "text": "Mein Nachbar hat drei Wahlbenachrichtigungen bekommen. Bei der Briefwahl kann doch jeder abstimmen, wie er will.",
+      "label_relevant": true,
+      "label_narrative": "briefwahl_betrug"
+    },
+    {
+      "id": "g004",
+      "text": "Wieder wurden gefälschte Unterlagen entdeckt. Die Briefwahl gehört abgeschafft, sofort!",
+      "label_relevant": true,
+      "label_narrative": "briefwahl_betrug"
+    },
+    {
+      "id": "g005",
+      "text": "Stimmen per Post verschicken und einfach hoffen, dass alles ehrlich abläuft? So eine Wahl kann man doch nicht ernst nehmen.",
+      "label_relevant": true,
+      "label_narrative": "briefwahl_betrug"
+    },
+    {
+      "id": "g006",
+      "text": "Die Umschläge werden angeblich sicher gezählt, aber wer glaubt das noch? Da wird im Hinterzimmer sortiert, wie es gerade passt.",
+      "label_relevant": true,
+      "label_narrative": "briefwahl_betrug"
+    },
+    {
+      "id": "g007",
+      "text": "Migranten bekommen sofort Bürgergeld, während unsere Rentner Flaschen sammeln müssen. Das ist die Wahrheit!",
+      "label_relevant": true,
+      "label_narrative": "sozialleistungen_migranten"
+    },
+    {
+      "id": "g008",
+      "text": "Wer Asyl beantragt, kriegt Wohnung und Sozialleistungen hinterhergeworfen. Deutsche warten Jahre.",
+      "label_relevant": true,
+      "label_narrative": "sozialleistungen_migranten"
+    },
+    {
+      "id": "g009",
+      "text": "Neue Zahlen: Milliarden für Migranten, Kürzungen für Rentner. Wo bleibt da die Gerechtigkeit?",
+      "label_relevant": true,
+      "label_narrative": "sozialleistungen_migranten"
+    },
+    {
+      "id": "g010",
+      "text": "Erst Asyl, dann Bürgergeld, dann Familiennachzug – und wer zahlt? Wir alle.",
+      "label_relevant": true,
+      "label_narrative": "sozialleistungen_migranten"
+    },
+    {
+      "id": "g011",
+      "text": "Die Regierung verteilt unser Steuergeld an Fremde, während die eigenen Leute im Alter leer ausgehen.",
+      "label_relevant": true,
+      "label_narrative": "sozialleistungen_migranten"
+    },
+    {
+      "id": "g012",
+      "text": "Erst kommen sie her, dann gibts sofort Geld vom Amt – und Oma muss Pfand sammeln. Diese Politik macht mich wütend.",
+      "label_relevant": true,
+      "label_narrative": "sozialleistungen_migranten"
+    },
+    {
+      "id": "g013",
+      "text": "Die Windräder trocknen unsere Böden aus! Seit dem Ausbau der Windkraft haben wir jedes Jahr Dürre.",
+      "label_relevant": true,
+      "label_narrative": "windkraft_duerre"
+    },
+    {
+      "id": "g014",
+      "text": "Wissenschaftler verschweigen es: Jedes neue Windrad verstärkt die Trockenheit in der Region.",
+      "label_relevant": true,
+      "label_narrative": "windkraft_duerre"
+    },
+    {
+      "id": "g015",
+      "text": "Kein Regen mehr, seit die Windkraft ausgebaut wurde. Zufall? Ich glaube nicht.",
+      "label_relevant": true,
+      "label_narrative": "windkraft_duerre"
+    },
+    {
+      "id": "g016",
+      "text": "Dürre in Brandenburg – und was baut man? Noch mehr Windräder. Die Dinger klauen dem Land das Wasser.",
+      "label_relevant": true,
+      "label_narrative": "windkraft_duerre"
+    },
+    {
+      "id": "g017",
+      "text": "Diese riesigen Rotoren verändern das Wetter, das sieht doch jeder. Aber die Politik will davon nichts wissen.",
+      "label_relevant": true,
+      "label_narrative": "windkraft_duerre"
+    },
+    {
+      "id": "g018",
+      "text": "Seit die weißen Riesen auf dem Feld stehen, regnet es kaum noch bei uns. Früher war der Boden nie so ausgetrocknet.",
+      "label_relevant": true,
+      "label_narrative": "windkraft_duerre"
+    },
+    {
+      "id": "g019",
+      "text": "Die EU verbietet schrittweise das Bargeld – der digitale Euro ist nur der Anfang der totalen Kontrolle!",
+      "label_relevant": true,
+      "label_narrative": "eu_bargeldverbot"
+    },
+    {
+      "id": "g020",
+      "text": "Ab 2027 kommt das Bargeldverbot. Wacht auf, Leute! Ohne Bargeld sind wir komplett überwachbar.",
+      "label_relevant": true,
+      "label_narrative": "eu_bargeldverbot"
+    },
+    {
+      "id": "g021",
+      "text": "Ein digitaler Euro wird programmierbar sein. Dann bestimmt Brüssel, wofür du dein Geld ausgeben darfst.",
+      "label_relevant": true,
+      "label_narrative": "eu_bargeldverbot"
+    },
+    {
+      "id": "g022",
+      "text": "Erst Obergrenzen, dann Abschaffung: Das Bargeld wird uns Stück für Stück weggenommen.",
+      "label_relevant": true,
+      "label_narrative": "eu_bargeldverbot"
+    },
+    {
+      "id": "g023",
+      "text": "Bald zahlen wir alle nur noch digital, und Brüssel schaut bei jedem Einkauf zu. Die Politik nennt das Fortschritt.",
+      "label_relevant": true,
+      "label_narrative": "eu_bargeldverbot"
+    },
+    {
+      "id": "g024",
+      "text": "Wenn Scheine und Münzen erst weg sind, kann dir jederzeit das Konto gesperrt werden. Aber die Regierung findet das modern.",
+      "label_relevant": true,
+      "label_narrative": "eu_bargeldverbot"
+    },
+    {
+      "id": "g025",
+      "text": "Die WHO plant mit dem Pandemievertrag die nächste Impfpflicht – diesmal weltweit und ohne unsere Parlamente!",
+      "label_relevant": true,
+      "label_narrative": "impfpflicht_rueckkehr"
+    },
+    {
+      "id": "g026",
+      "text": "Der Impfzwang kommt zurück, das steht schon fest. Die Gesetze dafür liegen fertig in der Schublade.",
+      "label_relevant": true,
+      "label_narrative": "impfpflicht_rueckkehr"
+    },
+    {
+      "id": "g027",
+      "text": "Leaks beweisen: Der Pandemievertrag hebelt nationale Gesundheitspolitik komplett aus.",
+      "label_relevant": true,
+      "label_narrative": "impfpflicht_rueckkehr"
+    },
+    {
+      "id": "g028",
+      "text": "Erst freiwillig, dann Pflicht: Die Impfpflicht wird über die Hintertür wieder eingeführt.",
+      "label_relevant": true,
+      "label_narrative": "impfpflicht_rueckkehr"
+    },
+    {
+      "id": "g029",
+      "text": "Genf entscheidet bald über unsere Gesundheit, nicht mehr unsere Regierung. Und keiner redet darüber!",
+      "label_relevant": true,
+      "label_narrative": "impfpflicht_rueckkehr"
+    },
+    {
+      "id": "g030",
+      "text": "Beim nächsten Virus machen sie die Spritze wieder zur Bedingung fürs normale Leben, wetten? Diesmal wehren wir uns von Anfang an.",
+      "label_relevant": true,
+      "label_narrative": "impfpflicht_rueckkehr"
+    },
+    {
+      "id": "g031",
+      "text": "Omas Apfelkuchen-Rezept: 6 Äpfel, 200g Mehl, Zimt und ganz viel Liebe. Gelingt immer!",
+      "label_relevant": false,
+      "label_narrative": "none"
+    },
+    {
+      "id": "g032",
+      "text": "Was für ein Spiel gestern! 3:2 in der Nachspielzeit, ich habe geschrien wie verrückt.",
+      "label_relevant": false,
+      "label_narrative": "none"
+    },
+    {
+      "id": "g033",
+      "text": "Meine Katze hat den Karton wieder mal dem teuren Kratzbaum vorgezogen. Typisch.",
+      "label_relevant": false,
+      "label_narrative": "none"
+    },
+    {
+      "id": "g034",
+      "text": "Suche Empfehlungen für gute Wanderrouten im Schwarzwald – gerne mit Einkehrmöglichkeit!",
+      "label_relevant": false,
+      "label_narrative": "none"
+    },
+    {
+      "id": "g035",
+      "text": "Der neue Staubsaugerroboter ist sein Geld echt wert. Endlich saubere Böden ohne Aufwand.",
+      "label_relevant": false,
+      "label_narrative": "none"
+    },
+    {
+      "id": "g036",
+      "text": "Heute Abend Serienmarathon mit Pizza. Besser wird der Sonntag nicht.",
+      "label_relevant": false,
+      "label_narrative": "none"
+    },
+    {
+      "id": "g037",
+      "text": "Bei der Auswahl zum Tor des Monats bin ich dieses Mal echt überfragt – alle drei waren Weltklasse.",
+      "label_relevant": false,
+      "label_narrative": "none"
+    },
+    {
+      "id": "g038",
+      "text": "Endlich Urlaub gebucht! Zwei Wochen Ostsee, ich freue mich riesig auf Strand und Fischbrötchen.",
+      "label_relevant": false,
+      "label_narrative": "none"
+    },
+    {
+      "id": "g039",
+      "text": "Die Debatte um das Tempolimit zeigt wieder, wie festgefahren die Politik in Deutschland ist.",
+      "label_relevant": true,
+      "label_narrative": "none"
+    },
+    {
+      "id": "g040",
+      "text": "Der Bundestag hat heute über die Reform des Mietrechts debattiert – die Regierung wirkt planlos.",
+      "label_relevant": true,
+      "label_narrative": "none"
+    },
+    {
+      "id": "g041",
+      "text": "Ohne unabhängige Gerichte keine Demokratie. Die Angriffe auf das Verfassungsgericht sollten uns alle alarmieren.",
+      "label_relevant": true,
+      "label_narrative": "none"
+    },
+    {
+      "id": "g042",
+      "text": "Kommunalwahl im Herbst: Die Parteien überbieten sich mal wieder mit Versprechen zur Verkehrswende.",
+      "label_relevant": true,
+      "label_narrative": "none"
+    }
+  ]
+}
