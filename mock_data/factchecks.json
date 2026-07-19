@@ -1,0 +1,52 @@
+[
+  {
+    "id": 1,
+    "claim_de": "Briefwahl Stimmzettel werden massenhaft gefälscht und Wahlbetrug ist bei der Briefwahl einfach",
+    "claim_en": "Mail-in ballots are being forged en masse; postal-vote fraud is easy",
+    "verdict": "false",
+    "fact_checker": "CORRECTIV.Faktencheck (mock entry)",
+    "url": "https://correctiv.org/faktencheck/EXAMPLE-briefwahl",
+    "narrative_code": "briefwahl_betrug",
+    "published_at": "2026-06-12"
+  },
+  {
+    "id": 2,
+    "claim_de": "Asylbewerber bekommen mehr Geld als Rentner in Deutschland",
+    "claim_en": "Asylum seekers receive more money than pensioners in Germany",
+    "verdict": "false",
+    "fact_checker": "dpa-Faktencheck (mock entry)",
+    "url": "https://dpa-factchecking.com/germany/EXAMPLE-sozialleistungen",
+    "narrative_code": "sozialleistungen_migranten",
+    "published_at": "2026-05-28"
+  },
+  {
+    "id": 3,
+    "claim_de": "Windräder entziehen der Luft Feuchtigkeit und verursachen Dürre und Trockenheit",
+    "claim_en": "Wind turbines remove moisture from the air and cause droughts",
+    "verdict": "false",
+    "fact_checker": "AFP Faktencheck (mock entry)",
+    "url": "https://faktencheck.afp.com/EXAMPLE-windraeder-duerre",
+    "narrative_code": "windkraft_duerre",
+    "published_at": "2026-07-02"
+  },
+  {
+    "id": 4,
+    "claim_de": "Die EU verbietet ab 2027 das Bargeld und führt den digitalen Euro als Pflicht ein",
+    "claim_en": "The EU bans cash from 2027 and makes the digital euro mandatory",
+    "verdict": "misleading",
+    "fact_checker": "dpa-Faktencheck (mock entry)",
+    "url": "https://dpa-factchecking.com/germany/EXAMPLE-bargeld",
+    "narrative_code": "eu_bargeldverbot",
+    "published_at": "2026-04-15"
+  },
+  {
+    "id": 5,
+    "claim_de": "Der WHO Pandemievertrag bringt die Impfpflicht für alle Deutschen zurück",
+    "claim_en": "The WHO pandemic treaty reintroduces mandatory vaccination for all Germans",
+    "verdict": "false",
+    "fact_checker": "CORRECTIV.Faktencheck (mock entry)",
+    "url": "https://correctiv.org/faktencheck/EXAMPLE-who-vertrag",
+    "narrative_code": "impfpflicht_rueckkehr",
+    "published_at": "2026-03-20"
+  }
+]

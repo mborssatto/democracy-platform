@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Democracy Platform — Prototype</title>
+<script src="/static/vue.global.prod.js"></script>
+<style>
+  :root{--ink:#1a2332;--muted:#5b6b7f;--line:#dde4ec;--bg:#f7f9fb;--card:#fff;
+    --blue:#2563eb;--blue-soft:#eaf1fe;--teal:#0d9488;--teal-soft:#e6f7f4;
+    --violet:#7c3aed;--violet-soft:#f3edfd;--red:#b91c1c;--red-soft:#fdecec;
+    --green:#15803d;--green-soft:#e9f7ee;--amber:#b45309;--amber-soft:#fdf3e3;}
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    color:var(--ink);background:var(--bg);line-height:1.45}
+  header{background:#fff;border-bottom:1px solid var(--line);padding:14px 24px;
+    display:flex;align-items:center;gap:18px;flex-wrap:wrap}
+  header h1{font-size:17px}
+  .mode{font-size:11px;font-weight:700;padding:3px 10px;border-radius:999px}
+  .mode.mock{background:var(--amber-soft);color:var(--amber)}
+  .mode.real{background:var(--green-soft);color:var(--green)}
+  nav{display:flex;gap:4px;margin-left:auto;flex-wrap:wrap}
+  nav button{border:none;background:none;padding:8px 14px;border-radius:8px;font-size:14px;
+    cursor:pointer;color:var(--muted);font-weight:600}
+  nav button.active{background:var(--blue-soft);color:var(--blue)}
+  .lang{border:1px solid var(--line);background:#fff;border-radius:8px;padding:6px 12px;
+    font-size:12.5px;cursor:pointer;font-weight:600;color:var(--muted)}
+  main{max-width:1080px;margin:0 auto;padding:24px 16px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;margin-bottom:14px}
+  h2{font-size:17px;margin-bottom:10px} h3{font-size:14.5px}
+  .hint{color:var(--muted);font-size:13px;margin-bottom:12px}
+  .btn{border:none;border-radius:8px;padding:9px 16px;font-size:13.5px;font-weight:600;cursor:pointer}
+  .btn-blue{background:var(--blue);color:#fff} .btn-teal{background:var(--teal);color:#fff}
+  .btn-ghost{background:#fff;border:1.5px solid var(--line);color:var(--ink)}
+  .btn:disabled{opacity:.45;cursor:not-allowed}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  .pill{font-size:11px;font-weight:700;border-radius:999px;padding:2px 9px}
+  .pill-plat{background:var(--blue-soft);color:var(--blue)}
+  .pill-score{background:var(--violet-soft);color:var(--violet)}
+  .pill-fc{background:var(--teal-soft);color:var(--teal)}
+  .pill-growth{background:var(--red-soft);color:var(--red)}
+  .item{border:1px solid var(--line);border-radius:10px;padding:12px;margin-top:10px;background:#fff}
+  .item p.txt{font-size:13.5px;margin:7px 0}
+  .meta{font-size:11.5px;color:var(--muted)}
+  .narr{border-left:4px solid var(--blue);padding-left:14px;margin-bottom:18px}
+  .stats{display:flex;gap:16px;font-size:12.5px;color:var(--muted);flex-wrap:wrap;margin:4px 0 2px}
+  textarea{width:100%;min-height:120px;border:1.5px solid var(--line);border-radius:10px;
+    padding:12px;font-size:14px;font-family:inherit;resize:vertical}
+  .gate{display:flex;gap:8px;align-items:flex-start;padding:7px 10px;border-radius:8px;
+    font-size:12.5px;margin-top:6px}
+  .gate.ok{background:var(--green-soft);color:var(--green)}
+  .gate.fail{background:var(--red-soft);color:var(--red)}
+  .seed{background:var(--violet-soft);border-radius:10px;padding:12px;font-size:13px;margin:10px 0}
+  .meter{height:8px;background:var(--line);border-radius:99px;overflow:hidden;margin:6px 0}
+  .meter div{height:100%;background:var(--violet);transition:width .3s}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:760px){.grid2{grid-template-columns:1fr}}
+  table{width:100%;border-collapse:collapse;font-size:12px}
+  td,th{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+  .empty{color:var(--muted);font-size:13.5px;padding:18px;text-align:center}
+  ul{padding-left:20px;font-size:13.5px} li{margin-bottom:5px}
+  .banner{background:var(--amber-soft);border:1px solid #eeddc0;border-radius:10px;
+    padding:10px 14px;font-size:12.5px;color:var(--amber);margin-bottom:14px}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>🛡️ Democracy Platform <span style="color:var(--muted);font-weight:400">prototype</span></h1>
+    <span class="mode" :class="state.ai_mode==='mock'?'mock':'real'">AI: {{ state.ai_mode }}</span>
+    <button class="lang" @click="lang = lang==='de' ? 'en' : 'de'">
+      {{ lang==='de' ? '🇬🇧 View in English' : '🇩🇪 Original (Deutsch)' }}
+    </button>
+    <nav>
+      <button :class="{active:tab==='setup'}" @click="tab='setup'">⚙️ Data</button>
+      <button :class="{active:tab==='radar'}" @click="tab='radar';loadRadar()">📡 Radar</button>
+      <button :class="{active:tab==='respond'}" @click="tab='respond';loadOpps()">💬 Respond</button>
+      <button :class="{active:tab==='studio'}" @click="tab='studio';loadRadar()">🎨 Studio</button>
+      <button :class="{active:tab==='audit'}" @click="tab='audit';loadAudit()">📋 Audit</button>
+    </nav>
+  </header>
+  <main>
+
+    <!-- ═══════════ SETUP / DATA ═══════════ -->
+    <div v-if="tab==='setup'">
+      <div class="banner">Mock mode: platform integrations are simulated with realistic fixture data.
+        Each "Ingest" button stands in for a real API — see <b>docs/integrations/</b> for the step-by-step
+        guide to make each one real.</div>
+      <div class="card">
+        <h2>1 · Ingest data</h2>
+        <p class="hint">Pull posts from each source. Authors are pseudonymized the moment data enters the system.</p>
+        <div class="row">
+          <button class="btn btn-blue" @click="ingest('tiktok')">Ingest TikTok (mock)</button>
+          <button class="btn btn-blue" @click="ingest('junkipedia')">Ingest Junkipedia (mock)</button>
+          <button class="btn btn-blue" @click="ingest('tipline')">Ingest tipline queue</button>
+          <span class="meta" v-if="ingestMsg">{{ ingestMsg }}</span>
+        </div>
+      </div>
+      <div class="card">
+        <h2>2 · Run the AI pipeline</h2>
+        <p class="hint">Six stages: triage → classify → embed → match fact-checks → score → create opportunities.</p>
+        <button class="btn btn-teal" @click="runPipeline">Run pipeline</button>
+        <div v-if="pipeLog" style="margin-top:12px">
+          <div class="gate ok">✔ Kept {{ pipeLog.triage_kept }} relevant posts · dropped {{ pipeLog.triage_dropped }} irrelevant (e.g. the cheesecake recipe)</div>
+          <div class="gate ok">✔ Classified {{ pipeLog.classified }} posts into narratives</div>
+          <div class="gate ok">✔ Matched {{ pipeLog.claim_matched }} posts to published fact-checks</div>
+          <div class="gate ok">✔ Created {{ pipeLog.opportunities }} response opportunities (low-reach posts never surface)</div>
+        </div>
+      </div>
+      <div class="card">
+        <h2>3 · Submit a tip (working feature)</h2>
+        <p class="hint">The community tipline is real — try it, then re-run the pipeline.</p>
+        <input v-model="tip.url" placeholder="Link to the post" style="width:100%;padding:9px;border:1.5px solid var(--line);border-radius:8px;margin-bottom:8px;font-size:13.5px">
+        <textarea v-model="tip.text" placeholder="What does the post claim?" style="min-height:70px"></textarea>
+        <button class="btn btn-ghost" style="margin-top:8px" @click="submitTip">Submit tip</button>
+        <span class="meta" v-if="tipMsg"> {{ tipMsg }}</span>
+      </div>
+    </div>
+
+    <!-- ═══════════ RADAR ═══════════ -->
+    <div v-if="tab==='radar'">
+      <div class="card">
+        <h2>📡 Narrative Radar</h2>
+        <p class="hint">Which false narratives are gaining traction right now, ranked by growth. Click a narrative in the Studio tab to turn it into a creator brief.</p>
+        <div v-if="!radar.length" class="empty">No data yet — go to ⚙️ Data, ingest sources and run the pipeline.</div>
+        <div v-for="n in radar" :key="n.code" class="narr">
+          <div class="row">
+            <h3>{{ lang==='de' ? n.label_de : n.label_en }}</h3>
+            <span class="pill pill-growth">▲ {{ n.growth_pct }}% views/24h</span>
+          </div>
+          <div class="stats">
+            <span>{{ n.post_count }} posts tracked</span>
+            <span>{{ fmt(n.total_views) }} total views</span>
+          </div>
+          <p class="meta">{{ n.description_en }}</p>
+          <div v-for="it in n.items.slice(0,3)" :key="it.id" class="item">
+            <div class="row">
+              <span class="pill pill-plat">{{ it.platform }}</span>
+              <span class="meta">{{ it.author_pseudo }} · {{ it.author_followers_band }} followers · {{ fmt(it.views) }} views</span>
+            </div>
+            <p class="txt">{{ lang==='de' ? it.text : (it.text_en || it.text) }}</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════ RESPOND (Democracy Bot) ═══════════ -->
+    <div v-if="tab==='respond'">
+      <div v-if="!activeDraft" class="card">
+        <h2>💬 Response opportunities</h2>
+        <p class="hint">Threads where a reply would matter, ranked by the transparent score. Claim one to start.</p>
+        <div v-if="!opps.length" class="empty">No open opportunities — ingest data and run the pipeline first.</div>
+        <div v-for="o in opps" :key="o.id" class="item">
+          <div class="row">
+            <span class="pill pill-plat">{{ o.platform }}</span>
+            <span class="pill pill-score">score {{ o.score }}</span>
+            <span v-if="o.fact_checker" class="pill pill-fc">✔ fact-check available</span>
+            <span class="meta">{{ fmt(o.views) }} views · {{ o.author_followers_band }} followers</span>
+          </div>
+          <p class="txt">{{ lang==='de' ? o.text : (o.text_en || o.text) }}</p>
+          <details class="meta" style="margin-bottom:8px">
+            <summary>Why this score?</summary>
+            <pre style="font-size:11px;margin-top:4px">{{ o.score_breakdown }}</pre>
+          </details>
+          <div class="row">
+            <button class="btn btn-blue" v-if="o.status==='open'" @click="claimOpp(o)">Claim & draft</button>
+            <span v-else class="meta">claimed</span>
+            <a v-if="o.fc_url" :href="o.fc_url" target="_blank" class="meta">{{ o.fact_checker }}: {{ o.verdict }} ↗</a>
+          </div>
+        </div>
+      </div>
+
+      <!-- draft editor -->
+      <div v-if="activeDraft" class="card">
+        <h2>✍️ Make it yours</h2>
+        <p class="hint">The AI seed below is <b>raw material, not a message</b>. The Post-ready state unlocks only
+          after you genuinely rework it — that's the human-in-the-loop gate, enforced in software.</p>
+        <div class="seed"><b>AI seed (immutable):</b><br>{{ activeDraft.ai_seed }}</div>
+        <textarea v-model="draftText" @input="debouncedCheck"></textarea>
+        <div class="meter"><div :style="{width: Math.min(100, gateResult.edit_distance_pct||0)+'%'}"></div></div>
+        <p class="meta">Edit distance: {{ gateResult.edit_distance_pct || 0 }}% (need ≥15% + substantive rework)</p>
+        <div v-for="c in gateResult.checks" :key="c.name" class="gate" :class="c.passed?'ok':'fail'">
+          <span>{{ c.passed ? '✔' : '✖' }}</span><span><b>{{ gateLabel(c.name) }}:</b> {{ c.detail }}</span>
+        </div>
+        <div class="row" style="margin-top:14px">
+          <button class="btn btn-ghost" @click="saveDraft">Re-check gates</button>
+          <button class="btn btn-teal" :disabled="!gateResult.post_ready" @click="copyText">
+            {{ copied ? 'Copied ✔' : 'Copy final text' }}</button>
+          <button class="btn btn-blue" :disabled="!gateResult.post_ready" @click="showPostedForm=true">
+            I posted it myself</button>
+          <button class="btn btn-ghost" @click="activeDraft=null;loadOpps()">Back</button>
+        </div>
+        <p class="meta" style="margin-top:8px">The platform has no post button and stores no passwords —
+          you post from your own account, then paste the link:</p>
+        <div v-if="showPostedForm" class="row" style="margin-top:8px">
+          <input v-model="postedUrl" placeholder="https://... link to your posted reply"
+            style="flex:1;padding:9px;border:1.5px solid var(--line);border-radius:8px;font-size:13px">
+          <button class="btn btn-blue" @click="markPosted">Confirm</button>
+        </div>
+        <p v-if="postedMsg" class="gate ok" style="margin-top:8px">✔ {{ postedMsg }}</p>
+      </div>
+    </div>
+
+    <!-- ═══════════ STUDIO ═══════════ -->
+    <div v-if="tab==='studio'">
+      <div class="card">
+        <h2>🎨 Creator Studio — briefs</h2>
+        <p class="hint">Turn a spreading narrative into a ready-to-use brief for a content creator.</p>
+        <div class="row">
+          <button v-for="n in radar" :key="n.code" class="btn btn-ghost" @click="makeBrief(n.code)">
+            {{ lang==='de' ? n.label_de : n.label_en }}</button>
+        </div>
+        <div v-if="!radar.length" class="empty">Run the pipeline first to see active narratives.</div>
+      </div>
+      <div v-if="brief" class="card">
+        <h3 style="margin-bottom:8px">Brief: {{ lang==='de' ? brief.narrative.label_de : brief.narrative.label_en }}</h3>
+        <p style="font-size:13.5px;margin-bottom:12px">{{ lang==='de' ? brief.brief.summary_de : brief.brief.summary_en }}</p>
+        <div class="grid2">
+          <div>
+            <h3>✔ Key facts (from published fact-checks only)</h3>
+            <ul><li v-for="f in brief.brief.key_facts">{{ f }}</li></ul>
+            <h3 style="margin-top:10px">🎯 Angles that work</h3>
+            <ul><li v-for="a in brief.brief.angles">{{ a }}</li></ul>
+          </div>
+          <div>
+            <h3>🚫 Avoid</h3>
+            <ul><li v-for="a in brief.brief.avoid">{{ a }}</li></ul>
+            <h3 style="margin-top:10px">📎 Sources</h3>
+            <ul><li v-for="c in brief.factchecks"><a :href="c.url" target="_blank">{{ c.fact_checker }} — {{ c.verdict }}</a></li></ul>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════ AUDIT ═══════════ -->
+    <div v-if="tab==='audit'">
+      <div class="card">
+        <h2>📋 Audit log (append-only)</h2>
+        <p class="hint">Every ingestion, pipeline run, gate decision, and vault access is recorded. This is the compliance evidence chain.</p>
+        <table>
+          <tr><th>When</th><th>Actor</th><th>Action</th><th>Detail</th></tr>
+          <tr v-for="a in audit" :key="a.id">
+            <td class="meta">{{ a.created_at }}</td><td>{{ a.actor }}</td>
+            <td><b>{{ a.action }}</b></td><td class="meta">{{ a.detail }}</td>
+          </tr>
+        </table>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+const { createApp } = Vue;
+const api = (path, opts) => fetch('/api'+path, opts).then(r => r.json());
+
+createApp({
+  data: () => ({
+    tab: 'setup', lang: 'de',
+    state: { ai_mode: '…', counts: {} },
+    radar: [], opps: [], audit: [],
+    ingestMsg: '', pipeLog: null,
+    tip: { url: '', text: '' }, tipMsg: '',
+    activeDraft: null, draftText: '', gateResult: { checks: [] },
+    showPostedForm: false, postedUrl: '', postedMsg: '', copied: false,
+    brief: null,
+    _debounce: null,
+  }),
+  mounted() { this.refreshState(); },
+  methods: {
+    fmt(n) { return n >= 1000 ? (n/1000).toFixed(n>=100000?0:1) + 'k' : n; },
+    gateLabel(n) {
+      return { edit_gate:'Genuine edit', neutrality:'Party neutrality', copypasta:'Not copy-paste',
+               dwell_time:'Review time', rate_cap:'Daily cap' }[n] || n;
+    },
+    async refreshState() { this.state = await api('/state'); },
+    async ingest(src) {
+      const r = await api('/ingest/'+src, { method:'POST' });
+      this.ingestMsg = `+${r.new_items} new items from ${src}`;
+      this.refreshState();
+    },
+    async runPipeline() { this.pipeLog = await api('/pipeline/run', { method:'POST' }); this.refreshState(); },
+    async submitTip() {
+      if (!this.tip.url || !this.tip.text) { this.tipMsg = 'Please fill both fields.'; return; }
+      await api('/tipline', { method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(this.tip) });
+      this.tipMsg = 'Tip received — run the pipeline to process it.';
+      this.tip = { url:'', text:'' };
+    },
+    async loadRadar() { this.radar = await api('/radar'); },
+    async loadOpps() { this.opps = await api('/opportunities'); },
+    async loadAudit() { this.audit = await api('/audit'); },
+    async claimOpp(o) {
+      await api(`/opportunities/${o.id}/claim`, { method:'POST' });
+      const d = await api(`/opportunities/${o.id}/draft`, { method:'POST' });
+      this.activeDraft = d; this.draftText = d.ai_seed;
+      this.gateResult = { checks: [], edit_distance_pct: 0, post_ready: false };
+      this.showPostedForm = false; this.postedMsg = ''; this.copied = false;
+    },
+    debouncedCheck() {
+      clearTimeout(this._debounce);
+      this._debounce = setTimeout(() => this.saveDraft(), 700);
+    },
+    async saveDraft() {
+      this.gateResult = await api(`/drafts/${this.activeDraft.draft_id}`, {
+        method:'PUT', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ text: this.draftText }) });
+    },
+    async copyText() {
+      try { await navigator.clipboard.writeText(this.draftText); this.copied = true;
+        setTimeout(()=>this.copied=false, 2000); } catch(e) {}
+    },
+    async markPosted() {
+      if (!this.postedUrl) return;
+      const r = await fetch(`/api/drafts/${this.activeDraft.draft_id}/mark-posted`, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ posted_url: this.postedUrl }) });
+      if (r.ok) { this.postedMsg = 'Recorded. The thread will be re-checked at +1h/+24h/+72h (full plan).'; }
+      else { const e = await r.json(); this.postedMsg = 'Error: ' + e.detail; }
+    },
+    async makeBrief(code) { this.brief = await api('/briefs/'+code, { method:'POST' }); },
+  },
+}).mount('#app');
+</script>
+</body>
+</html>

@@ -1,0 +1,22 @@
+[
+  {
+    "id": "tip-0001",
+    "reported_account": "instagram:af_klartext_ost",
+    "followers_band": "10k-100k",
+    "text": "Reel behauptet: 'Rentner müssen Flaschen sammeln während Asylbewerber 1800€ plus Luxuswohnung bekommen.' Läuft gerade stark in meiner Region, viele wütende Kommentare.",
+    "_translation_en": "Reel claims: 'Pensioners have to collect bottles while asylum seekers get €1800 plus a luxury apartment.' Currently spreading fast in my region, lots of angry comments.",
+    "url": "https://www.instagram.com/reel/EXAMPLE123/",
+    "submitted_at": "2026-07-14T15:30:00",
+    "views_estimate": 25000
+  },
+  {
+    "id": "tip-0002",
+    "reported_account": "tiktok:unbekannt",
+    "followers_band": "unknown",
+    "text": "Video mit KI-Stimme behauptet die Windräder in Sachsen-Anhalt hätten 'das Grundwasser um 40% reduziert'. Wirkt professionell gemacht, verbreitet sich in Landwirtschafts-Gruppen.",
+    "_translation_en": "Video with AI voice claims wind turbines in Sachsen-Anhalt 'reduced groundwater by 40%'. Looks professionally made, spreading in farming groups.",
+    "url": "https://www.tiktok.com/@EXAMPLE/video/999",
+    "submitted_at": "2026-07-14T17:10:00",
+    "views_estimate": 12000
+  }
+]

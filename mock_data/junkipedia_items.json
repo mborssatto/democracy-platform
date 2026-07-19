@@ -1,0 +1,32 @@
+[
+  {
+    "id": "jp-2026-071401",
+    "channel_name": "TelegramChannel:deutschland_erwacht",
+    "followers_band": "10k-100k",
+    "post_title": "EXKLUSIV: Interne Dokumente beweisen dass die Briefwahl Stimmzettel in Druckereien manipuliert werden. Der Wahlbetrug wird vorbereitet!",
+    "_translation_en": "EXCLUSIVE: Internal documents prove that mail-in ballots are being manipulated at printing facilities. The election fraud is being prepared!",
+    "published_url": "https://t.me/EXAMPLE/44321",
+    "published_at": "2026-07-14T06:40:00",
+    "engagement": { "views": 52000, "views_prev": 21000, "likes": 0, "comments": 0, "shares": 3100 }
+  },
+  {
+    "id": "jp-2026-071402",
+    "channel_name": "TelegramChannel:freie_buerger_info",
+    "followers_band": "1k-10k",
+    "post_title": "Die EU-Verordnung zum Bargeldverbot liegt schon fertig in der Schublade. Digitaler Euro = totale Kontrolle. Leitet das weiter!",
+    "_translation_en": "The EU regulation banning cash is already sitting finished in a drawer. Digital euro = total control. Forward this!",
+    "published_url": "https://t.me/EXAMPLE/9987",
+    "published_at": "2026-07-13T21:15:00",
+    "engagement": { "views": 18000, "views_prev": 6000, "likes": 0, "comments": 0, "shares": 1200 }
+  },
+  {
+    "id": "jp-2026-071403",
+    "channel_name": "TelegramChannel:impffrei_leben",
+    "followers_band": "10k-100k",
+    "post_title": "WHO-Vertrag ratifiziert: Ab Herbst gilt die Impfpflicht wieder. Wer sich weigert verliert den Job. Quelle im Kanal.",
+    "_translation_en": "WHO treaty ratified: from autumn, mandatory vaccination applies again. Those who refuse lose their jobs. Source in the channel.",
+    "published_url": "https://t.me/EXAMPLE/17765",
+    "published_at": "2026-07-14T12:00:00",
+    "engagement": { "views": 44000, "views_prev": 12000, "likes": 0, "comments": 0, "shares": 2800 }
+  }
+]
