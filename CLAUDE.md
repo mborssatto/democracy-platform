@@ -13,7 +13,11 @@ python run.py                     # run → http://localhost:8400
 python -m pytest tests/ -q        # tests (must stay green; run from repo root)
 ```
 
-No build step: the frontend is a single Vue page (`frontend/index.html`, vendored Vue).
+Frontend: primary UI in `frontend-nuxt/` (Nuxt 3 + TS, SPA — `cd frontend-nuxt &&
+npm install && npm run generate`, then FastAPI serves the build at `/`).
+`frontend/index.html` is the zero-build fallback at `/demo` (vendored Vue; also
+served at `/` when no Nuxt build exists — the repo works with no node toolchain).
+`npm run dev` proxies `/api` to the backend (`NUXT_API_PROXY`, default `:8400`).
 
 ## Architecture (60 seconds)
 

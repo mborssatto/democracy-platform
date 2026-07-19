@@ -14,6 +14,15 @@ FRONTEND = Path(__file__).resolve().parent.parent / "frontend"
 app.mount("/static", StaticFiles(directory=FRONTEND), name="static")
 app.include_router(auth.router)  # POST /api/login, /api/logout (dev auth stub)
 
+# M4.1: the primary UI is the Nuxt SPA (frontend-nuxt/ → `npm run generate`).
+# If the static build exists we serve it at / and mount its hashed assets at
+# /_nuxt; with NO node build the repo still works — / falls back to the
+# zero-build page (which is always available at /demo regardless).
+NUXT_INDEX = Path(__file__).resolve().parent.parent / "frontend-nuxt" / ".output" / "public" / "index.html"
+_nuxt_built = NUXT_INDEX.is_file()  # decided once at startup, like the mount below
+if _nuxt_built:
+    app.mount("/_nuxt", StaticFiles(directory=NUXT_INDEX.parent / "_nuxt"), name="nuxt_assets")
+
 # Route guards (auth stub — see app/auth.py for the production Supabase swap):
 #   public          GET /, /static, POST /api/login, GET /api/state
 #   admin+staff     Radar, audit log, briefs, fact-check sync, ingestion, pipeline
@@ -45,6 +54,15 @@ def startup() -> None:
 
 @app.get("/")
 def index():
+    """Nuxt build when present, zero-build page otherwise (see M4.1 note above)."""
+    if _nuxt_built:
+        return FileResponse(NUXT_INDEX)
+    return FileResponse(FRONTEND / "index.html")
+
+
+@app.get("/demo")
+def demo():
+    """The original zero-build Vue page — always served, needs no node toolchain."""
     return FileResponse(FRONTEND / "index.html")
 
 

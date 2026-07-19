@@ -27,6 +27,29 @@ to switch every AI step from mock to a real model. Nothing else changes.
 
 Run the tests: `python -m pytest tests/ -q` (14 tests: gates, pipeline, pseudonymization canary).
 
+## Frontend
+
+The primary UI is a Nuxt 3 + TypeScript SPA in `frontend-nuxt/`:
+
+```bash
+cd frontend-nuxt
+npm install
+npm run generate     # static build → frontend-nuxt/.output/public
+cd .. && python run.py   # FastAPI now serves the built SPA at /
+```
+
+For development with hot reload, keep the backend running and start the dev server:
+
+```bash
+cd frontend-nuxt && npm run dev
+# proxies /api and /static to http://localhost:8400 by default;
+# point it elsewhere with: NUXT_API_PROXY=http://localhost:8410 npm run dev
+```
+
+The original zero-build page (`frontend/index.html`, vendored Vue) stays available
+at **/demo** as a fallback, and needs no node toolchain at all — with no Nuxt build
+present, `/` serves it too, so the repo keeps working without node.
+
 ## The 3-minute demo script
 
 1. **⚙️ Data tab** — click the three Ingest buttons, then **Run pipeline**. Watch the
@@ -93,7 +116,8 @@ app/
   llm.py             AI layer — mock by default, real with a key
   pseudo.py          HMAC pseudonymization + audited re-id vault
   connectors.py      data sources (mocked, with integration pointers)
-frontend/index.html  single-page Vue app (vendored Vue, no build step)
+frontend-nuxt/       primary UI — Nuxt 3 + TypeScript SPA (npm run generate)
+frontend/index.html  zero-build fallback page (vendored Vue), served at /demo
 mock_data/           realistic fixtures in real-API shapes
 docs/integrations/   step-by-step guide per integration
 tests/               gates + pipeline + pseudonymization canary
