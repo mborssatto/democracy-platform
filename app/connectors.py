@@ -112,3 +112,38 @@ def load_factchecks() -> list[dict]:
 
 def load_narratives() -> list[dict]:
     return _load("narratives.json")
+
+
+# Asset-type routing for media extraction is by file extension — ingestion
+# knows what it downloaded; this keeps extraction (app/extract.py) blind to
+# platforms and file provenance.
+_MEDIA_EXTENSIONS = {
+    ".mp4": "video", ".mov": "video", ".webm": "video",
+    ".jpg": "image", ".jpeg": "image", ".png": "image", ".webp": "image",
+    ".mp3": "audio", ".m4a": "audio", ".wav": "audio", ".aac": "audio",
+}
+
+
+def tiktok_media_post(video: dict, asset_paths: list[str]) -> "extract.MediaPost":
+    """Ingestion adapter: TikTok video record + already-acquired local files →
+    canonical MediaPost for app/extract.py.
+
+    Acquisition itself is out of scope here (no scraping — files must come from
+    a legitimate source, e.g. researcher downloads under the Research API
+    terms). Instagram gets its own adapter once Meta Content Library access is
+    approved (see BACKLOG.md, Parked).
+    """
+    from app import extract  # local import: connectors must not hard-depend on extract
+
+    assets = []
+    for path in asset_paths:
+        ext = Path(path).suffix.lower()
+        if ext not in _MEDIA_EXTENSIONS:
+            raise ValueError(f"unsupported media file type: {path}")
+        assets.append(extract.MediaAsset(_MEDIA_EXTENSIONS[ext], path))
+    return extract.MediaPost(
+        platform="tiktok",
+        post_id=str(video["id"]),
+        caption_text=video.get("video_description") or None,
+        assets=tuple(assets),
+    )

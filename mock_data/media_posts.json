@@ -1,0 +1,69 @@
+{
+  "_comment": "Fixture MediaPosts for the media-extraction module (app/extract.py). Shapes cover every post form the extractor must handle: spoken video, mute overlay video, mixed channels, music-only audio, slide posts, contradicting caption, and a non-TikTok platform to prove platform-agnosticism. The asset local_paths are placeholders — MockExtractor routes on the file NAME and never opens the file.",
+  "posts": [
+    {
+      "platform": "tiktok",
+      "post_id": "tt-speech-only",
+      "caption_text": "Wichtig! Bitte bis zum Ende anschauen.",
+      "assets": [
+        { "type": "video", "local_path": "mock_data/media/speech_only.mp4" }
+      ]
+    },
+    {
+      "platform": "tiktok",
+      "post_id": "tt-mute-overlay",
+      "caption_text": null,
+      "assets": [
+        { "type": "video", "local_path": "mock_data/media/mute_overlay.mp4" }
+      ]
+    },
+    {
+      "platform": "tiktok",
+      "post_id": "tt-speech-vs-overlay",
+      "caption_text": null,
+      "assets": [
+        { "type": "video", "local_path": "mock_data/media/speech_vs_overlay.mp4" }
+      ]
+    },
+    {
+      "platform": "tiktok",
+      "post_id": "tt-music-only",
+      "caption_text": null,
+      "assets": [
+        { "type": "video", "local_path": "mock_data/media/trending_audio.mp4" }
+      ]
+    },
+    {
+      "platform": "tiktok",
+      "post_id": "tt-slides",
+      "caption_text": "Alle Folien lesen und teilen!",
+      "assets": [
+        { "type": "image", "local_path": "mock_data/media/slide_1.jpg" },
+        { "type": "image", "local_path": "mock_data/media/slide_2.jpg" },
+        { "type": "image", "local_path": "mock_data/media/slide_3.jpg" },
+        { "type": "image", "local_path": "mock_data/media/slide_4.jpg" },
+        { "type": "audio", "local_path": "mock_data/media/trending_sound.mp3" }
+      ]
+    },
+    {
+      "platform": "tiktok",
+      "post_id": "tt-caption-contradicts",
+      "caption_text": "Die Briefwahl ist sicher — Faktencheck im Kommentar.",
+      "assets": [
+        { "type": "video", "local_path": "mock_data/media/mute_overlay.mp4" }
+      ]
+    },
+    {
+      "platform": "instagram",
+      "post_id": "ig-slides",
+      "caption_text": "Alle Folien lesen und teilen!",
+      "assets": [
+        { "type": "image", "local_path": "mock_data/media/slide_1.jpg" },
+        { "type": "image", "local_path": "mock_data/media/slide_2.jpg" },
+        { "type": "image", "local_path": "mock_data/media/slide_3.jpg" },
+        { "type": "image", "local_path": "mock_data/media/slide_4.jpg" },
+        { "type": "audio", "local_path": "mock_data/media/trending_sound.mp3" }
+      ]
+    }
+  ]
+}

@@ -13,3 +13,4 @@ node_modules/
 frontend-nuxt/.output/
 frontend-nuxt/dist
 .claude/
+data/media/

@@ -30,6 +30,44 @@ export interface State {
 }
 
 /** One content_items row inside a radar narrative (subset the UI uses). */
+/** The six evaluation categories (mirrors app/llm.py EVAL_CATEGORIES). */
+export type EvalCategory =
+  | 'false_information'
+  | 'illegal_content'
+  | 'fundamental_rights'
+  | 'civic_discourse'
+  | 'vulnerable_groups'
+  | 'pro_democracy'
+
+/** One category verdict from the auditable narrative evaluation. */
+export interface EvalVerdict {
+  applies: boolean
+  rationale: string
+}
+
+/** Enrichment stage 'narrative_eval' — versioned prompt, per-category verdicts. */
+export interface NarrativeEval {
+  prompt_version: string
+  prompt_sha256: string
+  quarantined?: boolean
+  categories: Partial<Record<EvalCategory, EvalVerdict>>
+}
+
+/** Stored media extraction channels (media_extractions row, parsed). */
+export interface MediaExtraction {
+  extractor: 'mock' | 'openrouter' | 'local'
+  has_speech: boolean
+  speech: { text: string; start_s: number; end_s: number }[]
+  on_screen_text: {
+    text: string
+    source:
+      | { type: 'video'; first_seen_s: number; last_seen_s: number }
+      | { type: 'slide'; index: number }
+  }[]
+  caption: string | null
+  merged_text: string
+}
+
 export interface NarrativeItem {
   id: number
   platform: string
@@ -40,6 +78,8 @@ export interface NarrativeItem {
   url: string | null
   views: number
   score_json: string | null
+  narrative_eval: NarrativeEval | null
+  extraction: MediaExtraction | null
 }
 
 /** GET /api/radar — one narrative with its top items. */
@@ -48,10 +88,17 @@ export interface Narrative {
   label_de: string
   label_en: string
   description_en: string
+  category: EvalCategory
   post_count: number
   total_views: number
   growth_pct: number
   items: NarrativeItem[]
+}
+
+/** POST /api/ingest/urls — per-row outcome. */
+export interface UrlIngestResult {
+  results: { url: string; status: 'queued' | 'invalid'; note?: string }[]
+  queued: number
 }
 
 /** GET /api/opportunities — opportunities row joined with item + fact-check. */

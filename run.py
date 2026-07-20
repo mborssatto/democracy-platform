@@ -2,6 +2,7 @@
 
 Usage:
     python run.py          # starts the app on http://localhost:8400
+                           # (or export PORT=... to use another port)
 """
 import os
 
@@ -12,4 +13,5 @@ if __name__ == "__main__":
     # (export RUN_WORKER=0 to disable). Tests never set it, so the worker
     # thread stays off there and the suite remains deterministic.
     os.environ.setdefault("RUN_WORKER", "1")
-    uvicorn.run("app.main:app", host="127.0.0.1", port=8400, reload=False)
+    port = int(os.environ.get("PORT", "8400"))
+    uvicorn.run("app.main:app", host="127.0.0.1", port=port, reload=False)

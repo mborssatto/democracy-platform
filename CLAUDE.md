@@ -36,6 +36,15 @@ served at `/` when no Nuxt build exists — the repo works with no node toolchai
   never leak into main tables — keep it passing.
 - `app/connectors.py` — data sources. Each mock reads `mock_data/*.json` shaped exactly
   like the real API; `docs/integrations/*.md` has the step-by-step to make each real.
+- `app/extract.py` (+ `extract_openrouter.py`, `extract_local.py`) — media content
+  extraction: downloaded post (video/slides/audio + caption) → one labeled `merged_text`
+  document. Mock by default; raw media may only go to local models or Vertex-pinned
+  Gemini (allowlist enforced in code). See `docs/integrations/media-extraction.md`.
+- `app/apify_tiktok.py` + `app/media_ingest.py` — URL ingestion (M5.1): TikTok post
+  URL → Apify download (PROTOTYPE-ONLY scraping exception, `docs/integrations/apify.md`)
+  → extraction → pseudonymized item. `app/prompts/` holds VERSIONED prompt files
+  (narrative evaluation stores each verdict with the prompt's sha256 — auditable;
+  never edit in place, add a _v2).
 - `app/db.py` — backend-switchable database layer: SQLite by default (zero setup),
   Postgres/Supabase via `DB_BACKEND=postgres` + `DATABASE_URL` (schema in
   `migrations/001_init.sql`). Details: `docs/integrations/supabase.md`.

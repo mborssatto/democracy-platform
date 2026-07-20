@@ -1,0 +1,43 @@
+{
+  "_comment": "Canned per-asset extraction fixtures for MockExtractor, keyed by asset file NAME (never platform — extraction is platform-agnostic by design). Video/audio entries: has_speech comes from the (simulated) VAD verdict, NOT from whether a transcript exists. Image entries: texts read off the slide; the slide index is assigned by asset order, not stored here.",
+  "speech_only.mp4": {
+    "has_speech": true,
+    "speech": [
+      { "text": "Die Briefwahl wird massenhaft manipuliert, das ist längst bewiesen.", "start_s": 0.0, "end_s": 4.2 },
+      { "text": "Teilt das Video, bevor es gelöscht wird.", "start_s": 4.6, "end_s": 7.1 }
+    ],
+    "overlays": []
+  },
+  "mute_overlay.mp4": {
+    "has_speech": false,
+    "speech": [],
+    "overlays": [
+      { "text": "BRIEFWAHL = WAHLBETRUG", "first_seen_s": 0.5, "last_seen_s": 6.0 },
+      { "text": "DIE MEDIEN SCHWEIGEN", "first_seen_s": 6.0, "last_seen_s": 9.5 }
+    ]
+  },
+  "speech_vs_overlay.mp4": {
+    "has_speech": true,
+    "speech": [
+      { "text": "Der digitale Euro kommt schon nächstes Jahr für alle.", "start_s": 0.0, "end_s": 3.8 }
+    ],
+    "overlays": [
+      { "text": "BARGELD WIRD 2027 KOMPLETT VERBOTEN", "first_seen_s": 1.0, "last_seen_s": 5.0 }
+    ]
+  },
+  "trending_audio.mp4": {
+    "_note": "Music-only sound, no speech. A naive Whisper pass would hallucinate fluent lyrics here — the VAD gate is what keeps speech empty.",
+    "has_speech": false,
+    "speech": [],
+    "overlays": []
+  },
+  "trending_sound.mp3": {
+    "_note": "Slideshow background music — VAD correctly finds no speech.",
+    "has_speech": false,
+    "speech": []
+  },
+  "slide_1.jpg": { "texts": ["Die Impfpflicht kommt zurück: was sie dir verschweigen (1/4)"] },
+  "slide_2.jpg": { "texts": ["Angeblich interne Dokumente beweisen die Pläne"] },
+  "slide_3.jpg": { "texts": ["Teile das, bevor es gelöscht wird"] },
+  "slide_4.jpg": { "texts": ["Folge für Teil 2"] }
+}

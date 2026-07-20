@@ -1,12 +1,14 @@
 <script setup lang="ts">
 // ⚙️ Data: ingest buttons, fact-check sync, pipeline run + queue depth +
 // dead-letter retry, and the tipline form.
-import type { FactcheckSync, IngestResult, PipelineLog, QueueStatus } from '~/types/api'
+import type { FactcheckSync, IngestResult, PipelineLog, QueueStatus, UrlIngestResult } from '~/types/api'
 
 const { api } = useApi()
 const { guard, refreshState } = useAppState()
 
 const ingestMsg = ref('')
+const urlsInput = ref('')
+const urlResults = ref<UrlIngestResult | null>(null)
 const pipeLog = ref<PipelineLog | null>(null)
 const queue = ref<QueueStatus | null>(null)
 const tip = ref({ url: '', text: '' })
@@ -45,6 +47,44 @@ async function ingest(src: string) {
     refreshState()
     loadQueue()
   })
+}
+
+async function submitUrls() {
+  const urls = urlsInput.value.split(/[\n,]/).map(u => u.trim()).filter(Boolean)
+  if (!urls.length) return
+  await guard(async () => {
+    urlResults.value = await api<UrlIngestResult>('/ingest/urls', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ urls }),
+    })
+    urlsInput.value = ''
+    loadQueue()
+  })
+}
+
+function onCsvUpload(e: Event) {
+  // Client-side CSV parse: take the `url` column when a header exists,
+  // otherwise every cell that looks like a URL. Delimiter , or ;.
+  const file = (e.target as HTMLInputElement).files?.[0]
+  if (!file) return
+  const reader = new FileReader()
+  reader.onload = () => {
+    const text = String(reader.result || '').replace(/^﻿/, '') // strip BOM
+    const lines = text.split(/\r?\n/).filter(l => l.trim())
+    if (!lines.length) return
+    const delim = (lines[0].match(/;/g)?.length || 0) > (lines[0].match(/,/g)?.length || 0) ? ';' : ','
+    const header = lines[0].toLowerCase().split(delim).map(h => h.trim().replace(/^"|"$/g, ''))
+    const urlCol = header.indexOf('url')
+    const rows = urlCol >= 0 ? lines.slice(1) : lines
+    const urls = rows
+      .map(l => (urlCol >= 0 ? l.split(delim)[urlCol] : l.split(delim).find(c => c.includes('http'))) || '')
+      .map(u => u.trim().replace(/^"|"$/g, ''))
+      .filter(u => u.startsWith('http'))
+    urlsInput.value = [urlsInput.value, ...urls].filter(Boolean).join('\n')
+  }
+  reader.readAsText(file)
+  ;(e.target as HTMLInputElement).value = '' // same file can be re-selected
 }
 
 async function syncFactchecks() {
@@ -98,6 +138,34 @@ async function submitTip() {
         <button class="btn btn-blue" @click="ingest('tipline')">Ingest tipline queue</button>
         <button class="btn btn-blue" @click="syncFactchecks">Sync fact-checks (Google API)</button>
         <span v-if="ingestMsg" class="meta">{{ ingestMsg }}</span>
+      </div>
+
+      <div class="item" style="margin-top:12px">
+        <h3 style="margin-top:0">Add posts by URL (single or bulk)</h3>
+        <p class="hint" style="margin-bottom:8px">
+          Paste TikTok post URLs (one per line or comma-separated), or upload a CSV with a
+          <b>url</b> column. Each post is downloaded, its video/slides analyzed
+          (speech + on-screen text + caption), then run through the pipeline.
+        </p>
+        <textarea
+          v-model="urlsInput"
+          placeholder="https://www.tiktok.com/@user/video/1234567890&#10;https://www.tiktok.com/@user/photo/9876543210"
+          style="min-height:70px"
+        />
+        <div class="row" style="margin-top:8px">
+          <button class="btn btn-teal" @click="submitUrls">Analyze URLs</button>
+          <label class="btn btn-ghost" style="cursor:pointer">
+            Upload CSV
+            <input type="file" accept=".csv,text/csv" style="display:none" @change="onCsvUpload">
+          </label>
+        </div>
+        <div v-if="urlResults" style="margin-top:8px">
+          <div class="gate ok">✔ {{ urlResults.queued }} URL(s) queued — the worker downloads and
+            analyzes them in the background (watch the job queue below).</div>
+          <div v-for="r in urlResults.results.filter(x => x.status === 'invalid')" :key="r.url" class="gate fail">
+            ✖ {{ r.url }} — {{ r.note }}
+          </div>
+        </div>
       </div>
     </div>
     <div class="card">

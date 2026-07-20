@@ -3,30 +3,42 @@
     "code": "briefwahl_betrug",
     "label_de": "Briefwahl-Betrug",
     "label_en": "Mail-in ballot fraud",
-    "description_en": "Claims that postal voting in Germany is systematically manipulated. Spikes before every election; erodes trust in the democratic process itself."
+    "description_en": "Claims that postal voting in Germany is systematically manipulated. Spikes before every election; erodes trust in the democratic process itself.",
+    "category": "civic_discourse"
   },
   {
     "code": "sozialleistungen_migranten",
     "label_de": "Migranten bekommen mehr als Rentner",
     "label_en": "Migrants get more benefits than pensioners",
-    "description_en": "False comparisons between asylum-seeker benefits and pensions, usually built on cherry-picked or invented numbers. Fuels resentment against both groups."
+    "description_en": "False comparisons between asylum-seeker benefits and pensions, usually built on cherry-picked or invented numbers. Fuels resentment against both groups.",
+    "category": "vulnerable_groups"
   },
   {
     "code": "windkraft_duerre",
     "label_de": "Windräder verursachen Dürre",
     "label_en": "Wind turbines cause drought",
-    "description_en": "Pseudo-scientific claim that wind farms dry out the land and cause droughts. Used to attack the energy transition."
+    "description_en": "Pseudo-scientific claim that wind farms dry out the land and cause droughts. Used to attack the energy transition.",
+    "category": "false_information"
   },
   {
     "code": "eu_bargeldverbot",
     "label_de": "EU verbietet Bargeld",
     "label_en": "EU is banning cash",
-    "description_en": "Claims the EU will abolish cash (often '2027') and force a surveillance currency via the digital euro. Misrepresents actual EU legislation."
+    "description_en": "Claims the EU will abolish cash (often '2027') and force a surveillance currency via the digital euro. Misrepresents actual EU legislation.",
+    "category": "false_information"
   },
   {
     "code": "impfpflicht_rueckkehr",
     "label_de": "Die Impfpflicht kommt zurück",
     "label_en": "Vaccine mandates are coming back",
-    "description_en": "Claims that WHO treaties or German law will reintroduce mandatory vaccinations. Misreads the WHO pandemic accord."
+    "description_en": "Claims that WHO treaties or German law will reintroduce mandatory vaccinations. Misreads the WHO pandemic accord.",
+    "category": "vulnerable_groups"
+  },
+  {
+    "code": "wahlbeteiligung_staerken",
+    "label_de": "Demokratie & Wahlbeteiligung stärken",
+    "label_en": "Strengthening democracy & turnout",
+    "description_en": "Pro-democracy content: nonpartisan encouragement to vote, accurate civic information, media literacy, constructive counter-speech. Creators can support these narratives.",
+    "category": "pro_democracy"
   }
 ]

@@ -44,6 +44,11 @@ def process_job(con, job) -> dict | None:
             if item["status"] == "pending":  # idempotent: an already-enriched item is a no-op
                 claims = con.execute("SELECT * FROM claims").fetchall()
                 item_log = pipeline.enrich_item(con, item, claims)
+        elif job["kind"] == "acquire_url":
+            # M5.1: URL → Apify acquisition → media extraction → content item.
+            from . import media_ingest  # lazy: keeps worker import-light
+
+            media_ingest.process_url(con, payload["url"])
         elif job["kind"] == "outcome_snapshot":
             # M4.2: re-check a thread we replied in (+1h/+24h/+72h) — mocked
             # fetch, idempotent write; see app/outcomes.py.

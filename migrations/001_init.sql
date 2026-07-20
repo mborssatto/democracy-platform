@@ -37,8 +37,14 @@ CREATE TABLE IF NOT EXISTS narratives (
     id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     code text UNIQUE,
     label_de text, label_en text,
-    description_en text
+    description_en text,
+    -- evaluation category (llm.EVAL_CATEGORIES): false_information |
+    -- illegal_content | fundamental_rights | civic_discourse |
+    -- vulnerable_groups | pro_democracy
+    category text DEFAULT 'false_information'
 );
+-- added 2026-07-20; CREATE TABLE IF NOT EXISTS never alters existing tables
+ALTER TABLE narratives ADD COLUMN IF NOT EXISTS category text DEFAULT 'false_information';
 
 CREATE TABLE IF NOT EXISTS enrichments (
     id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -162,6 +168,23 @@ CREATE TABLE IF NOT EXISTS jobs (
     last_error text,
     created_at text,
     updated_at text
+);
+
+CREATE TABLE IF NOT EXISTS media_extractions (
+    -- Media content extraction results (docs/integrations/media-extraction.md):
+    -- the structured channels behind the item's merged_text. One per item.
+    -- NO author fields here — the pseudonymization canary applies to this
+    -- table too; merged_text is content, the author is only in content_items
+    -- as a pseudonym.
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    item_id bigint NOT NULL UNIQUE,
+    extractor text NOT NULL,             -- mock | openrouter | local
+    has_speech integer NOT NULL,         -- VAD/model verdict, 0/1
+    speech_json text NOT NULL,           -- [{text,start_s,end_s}]
+    on_screen_json text NOT NULL,        -- [{text,source:{...}}]
+    caption text,
+    merged_text text NOT NULL,
+    created_at text
 );
 
 CREATE TABLE IF NOT EXISTS outcome_snapshots (

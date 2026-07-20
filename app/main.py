@@ -7,7 +7,9 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import auth, config, connectors, db, factcheck, gates, llm, outcomes, pipeline, pseudo, queue, worker
+from . import (auth, config, connectors, db, factcheck, gates, llm, media_ingest,
+               outcomes, pipeline, pseudo, queue, worker)
+from . import apify_tiktok
 
 app = FastAPI(title="Democracy Platform — Prototype")
 FRONTEND = Path(__file__).resolve().parent.parent / "frontend"
@@ -92,25 +94,48 @@ def ingest_source(con, source: str) -> dict:
     NEW item. Shared by the ingest endpoint and the periodic scheduler."""
     new = 0
     for item in SOURCES[source]():
-        # Pseudonymize at the boundary: the real handle never enters content_items.
-        pseudo_id = pseudo.pseudonymize(item["real_author_id"])
-        pseudo.store_mapping(con, item["real_author_id"], pseudo_id)
-        cur = con.execute(
-            db.sql_insert_ignore(
-                "INTO content_items "
-                "(platform, platform_item_id, author_pseudo, author_followers_band, text, text_en, "
-                " url, posted_at, ingested_at, views, views_prev, likes, comments, shares) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)"),
-            (item["platform"], item["platform_item_id"], pseudo_id, item["followers_band"],
-             item["text"], item["text_en"], item["url"], item["posted_at"], db.now(),
-             item["views"], item["views_prev"], item["likes"], item["comments"], item["shares"]),
-        )
-        if cur.rowcount:  # inserted (not a duplicate) → queue it for enrichment
-            queue.enqueue(con, "enrich_item", {"item_id": cur.lastrowid})
+        # Pseudonymize-at-the-boundary + insert + enqueue live in media_ingest
+        # so the URL ingestion path (M5.1) shares the exact same code.
+        if media_ingest.insert_content_item(con, item) is not None:
             new += 1
     db.audit(con, "ingestion", f"ingest_{source}", {"new_items": new, "enqueued": new})
     con.commit()
     return {"source": source, "new_items": new, "enqueued": new}
+
+
+class UrlsIn(BaseModel):
+    urls: list[str] = Field(min_length=1, max_length=50)
+
+
+# NOTE: registered BEFORE /api/ingest/{source} — FastAPI matches in
+# registration order, and the dynamic route would swallow "urls" as a source.
+@app.post("/api/ingest/urls")
+def ingest_urls(body: UrlsIn, user: dict = STAFF):
+    """M5.1: submit TikTok post URLs for acquisition + analysis. Each valid URL
+    becomes an 'acquire_url' job (Apify download → media extraction → pipeline);
+    invalid rows come back marked instead of failing the batch."""
+    if not apify_tiktok.enabled():
+        raise HTTPException(
+            503, "Apify acquisition is not configured (APIFY_TOKEN missing) — "
+                 "URL ingestion is unavailable. See docs/integrations/apify.md.")
+    con = db.connect()
+    try:
+        results, queued = [], 0
+        for url in body.urls:
+            url = url.strip()
+            if media_ingest.is_tiktok_post_url(url):
+                queue.enqueue(con, "acquire_url", {"url": url})
+                results.append({"url": url, "status": "queued"})
+                queued += 1
+            else:
+                results.append({"url": url, "status": "invalid",
+                                "note": "not a TikTok post URL (…/@user/video/… or …/photo/…)"})
+        db.audit(con, "ingestion", "ingest_urls",
+                 {"submitted": len(body.urls), "queued": queued})
+        con.commit()
+        return {"results": results, "queued": queued}
+    finally:
+        con.close()
 
 
 @app.post("/api/ingest/{source}")
@@ -180,7 +205,8 @@ def pipeline_run(user: dict = STAFF):
         con.commit()
 
         log = {"triage_kept": 0, "triage_dropped": 0, "classified": 0,
-               "claim_matched": 0, "opportunities": 0, "mode": llm.mode()}
+               "narrative_evaluated": 0, "claim_matched": 0, "opportunities": 0,
+               "mode": llm.mode()}
         drained = 0
         while (job := queue.claim_next(con)) is not None:
             item_log = worker.process_job(con, job)  # commits/fails per job
@@ -232,29 +258,73 @@ def retry_dead_job(job_id: int, user: dict = STAFF):
 
 
 # ------------------------------------------------------------------ radar
+class NarrativeIn(BaseModel):
+    code: str = Field(min_length=2, max_length=64, pattern=r"^[a-z0-9_]+$")
+    label_de: str = Field(min_length=1)
+    label_en: str = Field(min_length=1)
+    description_en: str = Field(min_length=1)
+    category: str
+
+
+@app.post("/api/narratives")
+def add_narrative(body: NarrativeIn, user: dict = STAFF):
+    """Add a narrative to the Radar watchlist — false narratives, the harm
+    categories (illegal content, fundamental rights, civic discourse,
+    minors/minorities/public health), or pro_democracy entries creators can
+    support. Category codes come from llm.EVAL_CATEGORIES."""
+    if body.category not in llm.EVAL_CATEGORIES:
+        raise HTTPException(
+            422, f"Unknown category '{body.category}'. One of: {', '.join(llm.EVAL_CATEGORIES)}.")
+    con = db.connect()
+    try:
+        cur = con.execute(
+            db.sql_insert_ignore(
+                "INTO narratives (code, label_de, label_en, description_en, category) "
+                "VALUES (?,?,?,?,?)"),
+            (body.code, body.label_de, body.label_en, body.description_en, body.category),
+        )
+        if not cur.rowcount:
+            raise HTTPException(409, f"Narrative '{body.code}' already exists.")
+        db.audit(con, "radar", "narrative_added",
+                 {"code": body.code, "category": body.category, "by": user["username"]})
+        con.commit()
+        return {"ok": True, "code": body.code}
+    finally:
+        con.close()
+
+
 @app.get("/api/radar")
 def radar(user: dict = STAFF):
     con = db.connect()
     narratives = []
     for n in con.execute("SELECT * FROM narratives").fetchall():
         rows = con.execute(
-            f"""SELECT ci.*, e.output_json score_json FROM content_items ci
+            f"""SELECT ci.*, e.output_json score_json, ne.output_json eval_json
+               FROM content_items ci
                JOIN enrichments ec ON ec.item_id=ci.id AND ec.stage='classify'
                LEFT JOIN enrichments e ON e.item_id=ci.id AND e.stage='score'
+               LEFT JOIN enrichments ne ON ne.item_id=ci.id AND ne.stage='narrative_eval'
                WHERE {db.sql_json_extract('ec.output_json', 'narrative')}=?
                ORDER BY ci.views DESC""", (n["code"],)).fetchall()
-        if not rows:
-            continue
         total_views = sum(r["views"] for r in rows)
         prev_views = sum(r["views_prev"] for r in rows)
+        items = []
+        for r in rows[:6]:
+            item = dict(r) | {"score_json": r["score_json"]}
+            item["narrative_eval"] = json.loads(r["eval_json"]) if r["eval_json"] else None
+            item["extraction"] = media_ingest.load_extraction(con, r["id"])
+            items.append(item)
+        # Empty narratives stay visible: a just-added watchlist entry must
+        # show up (with 0 posts) or adding it looks broken.
         narratives.append({
             "code": n["code"], "label_de": n["label_de"], "label_en": n["label_en"],
             "description_en": n["description_en"],
+            "category": n["category"] or "false_information",
             "post_count": len(rows), "total_views": total_views,
             "growth_pct": round(100 * (total_views - prev_views) / max(1, prev_views)),
-            "items": [dict(r) | {"score_json": r["score_json"]} for r in rows[:6]],
+            "items": items,
         })
-    narratives.sort(key=lambda x: -x["growth_pct"])
+    narratives.sort(key=lambda x: (-x["post_count"], -x["growth_pct"]))
     con.close()
     return narratives
 

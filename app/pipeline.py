@@ -39,7 +39,7 @@ def enrich_item(con, item, claims, item_vector=None, claim_vectors=None,
     many items); when absent — the single-item worker path — they are fetched
     here after triage, so dropped items never cost an embedding call."""
     log = {"triage_kept": 0, "triage_dropped": 0, "classified": 0,
-           "claim_matched": 0, "opportunities": 0}
+           "narrative_evaluated": 0, "claim_matched": 0, "opportunities": 0}
 
     # ---- Stage 1: triage (+ translation) ------------------------------------
     verdict = llm.triage(item["text"])
@@ -54,9 +54,18 @@ def enrich_item(con, item, claims, item_vector=None, claim_vectors=None,
     log["triage_kept"] += 1
 
     # ---- Stage 2: classify into a narrative ---------------------------------
-    cls = llm.classify(item["text"])
+    codes = [r["code"] for r in con.execute("SELECT code FROM narratives").fetchall()]
+    cls = llm.classify(item["text"], codes=codes)
     _store(con, item["id"], "classify", cls)
     log["classified"] += 1
+
+    # ---- Stage 2b: narrative evaluation (auditable, versioned prompt) -------
+    # Six categories incl. pro_democracy; the stored JSON carries the prompt
+    # version + sha256 so every verdict is traceable to its exact prompt text.
+    # NO fact-check verdicts are generated here (hard rule 3) — the
+    # false_information category only records tracked-narrative matches.
+    _store(con, item["id"], "narrative_eval", llm.narrative_eval(item["text"]))
+    log["narrative_evaluated"] += 1
 
     # ---- Stage 3: embed ------------------------------------------------------
     # Real vectors when an embedding key is set; in mock mode word overlap
@@ -113,7 +122,8 @@ def run_pipeline(con) -> dict:
     """Process every pending item through all stages, synchronously.
     Returns a stage-by-stage log."""
     log = {"triage_kept": 0, "triage_dropped": 0, "classified": 0,
-           "claim_matched": 0, "opportunities": 0, "mode": llm.mode()}
+           "narrative_evaluated": 0, "claim_matched": 0, "opportunities": 0,
+           "mode": llm.mode()}
 
     items = con.execute("SELECT * FROM content_items WHERE status='pending'").fetchall()
     claims = con.execute("SELECT * FROM claims").fetchall()
@@ -235,9 +245,15 @@ def seed_reference_data(con) -> None:
     """Load narratives + fact-check corpus (idempotent)."""
     for n in connectors.load_narratives():
         con.execute(
-            db.sql_insert_ignore("INTO narratives (code, label_de, label_en, description_en) VALUES (?,?,?,?)"),
-            (n["code"], n["label_de"], n["label_en"], n["description_en"]),
+            db.sql_insert_ignore(
+                "INTO narratives (code, label_de, label_en, description_en, category) VALUES (?,?,?,?,?)"),
+            (n["code"], n["label_de"], n["label_en"], n["description_en"],
+             n.get("category", "false_information")),
         )
+        # Databases seeded before the category column existed hold the default
+        # ('false_information') — refresh it so re-seeding is truly idempotent.
+        con.execute("UPDATE narratives SET category=? WHERE code=?",
+                    (n.get("category", "false_information"), n["code"]))
     for c in connectors.load_factchecks():
         con.execute(
             db.sql_insert_ignore(

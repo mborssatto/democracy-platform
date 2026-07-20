@@ -66,7 +66,11 @@ CREATE TABLE IF NOT EXISTS narratives (
     id INTEGER PRIMARY KEY,
     code TEXT UNIQUE,
     label_de TEXT, label_en TEXT,
-    description_en TEXT
+    description_en TEXT,
+    -- evaluation category (llm.EVAL_CATEGORIES): false_information |
+    -- illegal_content | fundamental_rights | civic_discourse |
+    -- vulnerable_groups | pro_democracy
+    category TEXT DEFAULT 'false_information'
 );
 
 CREATE TABLE IF NOT EXISTS enrichments (
@@ -191,6 +195,23 @@ CREATE TABLE IF NOT EXISTS jobs (
     updated_at TEXT
 );
 
+CREATE TABLE IF NOT EXISTS media_extractions (
+    -- Media content extraction results (docs/integrations/media-extraction.md):
+    -- the structured channels behind the item's merged_text. One per item.
+    -- NO author fields here — the pseudonymization canary applies to this
+    -- table too; merged_text is content, the author is only in content_items
+    -- as a pseudonym.
+    id INTEGER PRIMARY KEY,
+    item_id INTEGER NOT NULL UNIQUE,
+    extractor TEXT NOT NULL,             -- mock | openrouter | local
+    has_speech INTEGER NOT NULL,         -- VAD/model verdict, 0/1
+    speech_json TEXT NOT NULL,           -- [{text,start_s,end_s}]
+    on_screen_json TEXT NOT NULL,        -- [{text,source:{...}}]
+    caption TEXT,
+    merged_text TEXT NOT NULL,
+    created_at TEXT
+);
+
 CREATE TABLE IF NOT EXISTS outcome_snapshots (
     -- M4.2: thread re-checks at +1h/+24h/+72h after a reply was posted, plus
     -- the projected no-intervention baseline per offset (plan Ch. 9: measure
@@ -291,6 +312,13 @@ def init_db() -> None:
         con.execute(PG_MIGRATION.read_text())  # CREATE TABLE IF NOT EXISTS throughout
     else:
         con.executescript(SCHEMA)
+        # Column added 2026-07-20 (narrative categories): CREATE TABLE IF NOT
+        # EXISTS never alters an existing table, so patch older SQLite files
+        # here. SQLite has no ADD COLUMN IF NOT EXISTS → try/except.
+        try:
+            con.execute("ALTER TABLE narratives ADD COLUMN category TEXT DEFAULT 'false_information'")
+        except Exception:
+            pass  # column already there
     con.commit()
     con.close()
 

@@ -8,9 +8,11 @@ stand in for the model so the whole prototype runs offline and free.
     Add ANTHROPIC_API_KEY (or OPENAI_API_KEY) to `.env` and the same functions
     call the real model. Mock and real return identical shapes.
 """
+import hashlib
 import json
 import os
 import re
+from pathlib import Path
 
 import httpx
 from dotenv import load_dotenv
@@ -19,6 +21,13 @@ load_dotenv()
 
 ANTHROPIC_KEY = os.environ.get("ANTHROPIC_API_KEY")
 OPENAI_KEY = os.environ.get("OPENAI_API_KEY")
+OPENROUTER_KEY = os.environ.get("OPENROUTER_API_KEY")
+
+# Reasoning model when routed via OpenRouter (one key for everything). Text
+# reaching this call is ALWAYS pseudonymized (hard rule 5 — canary-tested), so
+# the raw-media Vertex pins from extract_openrouter.py don't apply here; we
+# still send data_collection=deny as basic hygiene.
+OPENROUTER_REASONING_MODEL = "anthropic/claude-haiku-4.5"
 
 
 def mode() -> str:
@@ -26,6 +35,8 @@ def mode() -> str:
         return "real:anthropic"
     if OPENAI_KEY:
         return "real:openai"
+    if OPENROUTER_KEY:
+        return "real:openrouter"
     return "mock"
 
 
@@ -50,11 +61,27 @@ def _call_real(system: str, user: str) -> str:
         )
         r.raise_for_status()
         return r.json()["content"][0]["text"]
+    if OPENAI_KEY:
+        r = httpx.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers={"Authorization": f"Bearer {OPENAI_KEY}"},
+            json={
+                "model": "gpt-4o-mini",
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+            },
+            timeout=60,
+        )
+        r.raise_for_status()
+        return r.json()["choices"][0]["message"]["content"]
     r = httpx.post(
-        "https://api.openai.com/v1/chat/completions",
-        headers={"Authorization": f"Bearer {OPENAI_KEY}"},
+        "https://openrouter.ai/api/v1/chat/completions",
+        headers={"Authorization": f"Bearer {OPENROUTER_KEY}"},
         json={
-            "model": "gpt-4o-mini",
+            "model": OPENROUTER_REASONING_MODEL,
+            "provider": {"data_collection": "deny"},
             "messages": [
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
@@ -142,7 +169,116 @@ NARRATIVE_KEYWORDS = {
     "windkraft_duerre": ["windräder", "windrad", "dürre", "trockenheit", "windkraft"],
     "eu_bargeldverbot": ["bargeld", "bargeldverbot", "eu verbietet", "digitaler euro"],
     "impfpflicht_rueckkehr": ["impfpflicht", "impfzwang", "who", "pandemievertrag"],
+    # pro-democracy watchlist entry (category=pro_democracy in narratives.json):
+    # matching it means SUPPORT, not misinformation — see PRO_NARRATIVE_CODES.
+    "wahlbeteiligung_staerken": ["geht wählen", "geh wählen", "wählen gehen",
+                                 "wahlbeteiligung", "demokratie stärken", "faktencheck"],
 }
+
+
+# --------------------------------------------------------- narrative evaluation
+# The six evaluation categories (DSA systemic-risk framing + pro-democracy).
+# Keys are stable codes stored in enrichments and narratives.category; the
+# full plain-language definitions live in the VERSIONED prompt file — the
+# prompt text + its sha256 are stored with every result, so any past verdict
+# can be traced to the exact wording that produced it (that is the "auditable"
+# part). Never edit a prompt file in place: copy to _v2 and bump _PROMPT_PATH.
+EVAL_CATEGORIES = (
+    "false_information",   # matches a tracked debunked narrative — NO new verdicts
+    "illegal_content",     # illegal in DE/EU: incitement, banned symbols, threats
+    "fundamental_rights",  # attacks dignity, equal treatment, press freedom...
+    "civic_discourse",     # delegitimizes elections/participation without evidence
+    "vulnerable_groups",   # threatens minors, minorities, or public health
+    "pro_democracy",       # SUPPORTS democratic values (nonpartisan)
+)
+
+_PROMPT_PATH = Path(__file__).resolve().parent / "prompts" / "narrative_eval_v1.md"
+_prompt_cache: dict = {}
+
+
+def _narrative_eval_prompt() -> tuple[str, str, str]:
+    """(version, text, sha256) of the current evaluation prompt, cached."""
+    if not _prompt_cache:
+        text = _PROMPT_PATH.read_text(encoding="utf-8")
+        _prompt_cache.update(
+            version=_PROMPT_PATH.stem,
+            text=text,
+            sha=hashlib.sha256(_PROMPT_PATH.read_bytes()).hexdigest(),
+        )
+    return _prompt_cache["version"], _prompt_cache["text"], _prompt_cache["sha"]
+
+
+def narrative_eval_prompt_sha() -> str:
+    return _narrative_eval_prompt()[2]
+
+
+# Narratives whose match means SUPPORT, not misinformation (mirrors
+# narratives.json category=pro_democracy — mock-mode only; the DB is the
+# source of truth for real classification).
+PRO_NARRATIVE_CODES = {"wahlbeteiligung_staerken"}
+
+_EVAL_MOCK_KEYWORDS = {
+    "illegal_content": ["gewalt gegen", "vernichten", "aufhängen", "waffe"],
+    "fundamental_rights": ["lügenpresse", "zensur", "systemmedien", "menschenwürde"],
+    "civic_discourse": ["wahlbetrug", "briefwahl", "stimmzettel", "wahl manipuliert",
+                        "wählt nicht", "wahlen sind sinnlos"],
+    "vulnerable_groups": ["impfpflicht", "impfzwang", "migranten", "asyl", "kinder"],
+    "pro_democracy": ["geht wählen", "geh wählen", "wählen gehen", "wahlbeteiligung",
+                      "faktencheck", "beteiligung", "demokratie stärken"],
+}
+
+
+def narrative_eval(text: str) -> dict:
+    """Stage 2b: which of the six categories apply, with one-line rationales.
+
+    Every result carries prompt_version + prompt_sha256. Real mode sends the
+    versioned prompt file verbatim as the system prompt; invalid model output
+    is QUARANTINED (categories empty), never guessed (repo convention)."""
+    version, prompt_text, sha = _narrative_eval_prompt()
+    meta = {"prompt_version": version, "prompt_sha256": sha}
+
+    if mode() != "mock":
+        raw = _real_json(prompt_text, text)
+        categories = {}
+        for code in EVAL_CATEGORIES:
+            cat = raw.get(code)
+            if not isinstance(cat, dict) or not isinstance(cat.get("applies"), bool) \
+                    or not isinstance(cat.get("rationale"), str):
+                return meta | {"quarantined": True, "categories": {}}
+            categories[code] = {"applies": cat["applies"], "rationale": cat["rationale"]}
+        return meta | {"categories": categories}
+
+    # Mock: deterministic keyword heuristics, same shape as the real model.
+    t = text.lower()
+    matched = classify(text)["narrative"]
+    tracked_false = matched != "none" and matched not in PRO_NARRATIVE_CODES
+    categories = {
+        "false_information": {
+            "applies": tracked_false,
+            "rationale": (f"matches tracked false narrative '{matched}' "
+                          "(no new truth verdict generated)" if tracked_false
+                          else "no tracked false narrative matched"),
+        }
+    }
+    for code in ("illegal_content", "fundamental_rights", "civic_discourse", "vulnerable_groups"):
+        hits = [k for k in _EVAL_MOCK_KEYWORDS[code] if k in t]
+        categories[code] = {
+            "applies": bool(hits),
+            "rationale": (f"keyword signal: {', '.join(hits)}" if hits
+                          else "no signal for this category"),
+        }
+    harm = tracked_false or any(categories[c]["applies"] for c in
+                                ("illegal_content", "fundamental_rights",
+                                 "civic_discourse", "vulnerable_groups"))
+    pro_hits = [k for k in _EVAL_MOCK_KEYWORDS["pro_democracy"] if k in t]
+    categories["pro_democracy"] = {
+        "applies": bool(pro_hits) and not harm,
+        "rationale": (f"supportive civic signal: {', '.join(pro_hits)}"
+                      if pro_hits and not harm
+                      else "harm category applies" if harm and pro_hits
+                      else "no pro-democracy signal"),
+    }
+    return meta | {"categories": categories}
 
 
 def triage(text: str) -> dict:
@@ -166,12 +302,14 @@ def translate(text: str, precomputed: str | None = None) -> str:
     return precomputed or f"[EN] {text}"
 
 
-def classify(text: str) -> dict:
-    """Stage 2: which tracked narrative does this post belong to?"""
+def classify(text: str, codes: list | None = None) -> dict:
+    """Stage 2: which tracked narrative does this post belong to?
+    `codes` (from the narratives table) lets newly added narratives take part
+    in real-mode classification; mock mode scans its static keyword map."""
     if mode() != "mock":
         return _real_json(
             "Classify the post into one of these narrative codes or 'none': "
-            + ", ".join(NARRATIVE_KEYWORDS) +
+            + ", ".join(codes or NARRATIVE_KEYWORDS) +
             '. Output JSON {"narrative": str, "confidence": float}.',
             text,
         )

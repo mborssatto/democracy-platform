@@ -42,6 +42,18 @@ Implement the real client from `docs/integrations/tiktok.md` against recorded fi
 Research API application is approved.
 ✓ Tests prove request/response mapping without network; flag off = current mock behavior.
 
+**M2.3 Media content extraction (added 2026-07-20 — DONE same day)**
+Turn a downloaded post (video / mute video / slides / audio + caption) into one merged
+text document for claim extraction: `app/extract.py` (types + MockExtractor, default),
+`app/extract_openrouter.py` (Gemini pinned to Google Vertex, ZDR, no fallbacks — behind
+`MEDIA_EXTRACTOR=openrouter` + `OPENROUTER_API_KEY`), `app/extract_local.py` (VAD-gated
+Whisper + local VLM; wiring done, internals TODO). Design + rationale:
+`docs/integrations/media-extraction.md`.
+✓ 7 fixture shapes covered incl. platform-agnosticism; merged_text deterministic;
+  client refuses to send without routing pins; VAD gate proven (Whisper never runs
+  when VAD finds no speech). Follow-up: implement LocalExtractor internals; wire
+  merged_text into the pipeline's claim-extraction stage (through `pseudo.py`).
+
 ## M3 — Production shape
 
 **M3.1 Supabase swap** — follow `docs/integrations/supabase.md`: migrations, psycopg,
@@ -69,9 +81,51 @@ locally), compute the thread-climate delta vs. the non-intervened baseline (plan
 **M4.4 Golden-set evals** — versioned labeled sample in `evals/`; a script scoring
 triage/classify precision+recall per prompt version; wire into CI (plan Ch. 2.4).
 
+## M5 — Queued (added after the M1–M4 build-out)
+
+**M5.1 URL submission in "Ingest data" (single + CSV bulk) — DONE 2026-07-21**
+Implemented for TikTok via the Apify acquisition path (owner decision: prototype-only
+scraping exception, see `docs/integrations/apify.md`): URLs (textarea or CSV upload)
+→ `POST /api/ingest/urls` → `acquire_url` jobs → Apify download → media extraction →
+pseudonymized item whose text is the merged channel document → pipeline incl. the
+auditable narrative evaluation (M5.2). Dead-letter + per-row invalid feedback as specced.
+Content hydration via URL alone (no Apify) remains as originally scoped below.
+
+*Original spec (still the shape for the no-scraping variant):*
+In the Data tab's "1 · Ingest data" section (`frontend-nuxt/components/DataTab.vue` +
+`/demo` fallback), let staff add post URLs by hand: one URL via a text input, or many
+via CSV upload (a `url` column; extra columns ignored; blank lines skipped).
+Backend: `POST /api/ingest/urls` (staff role, like `/api/ingest/{source}`) parses
+platform + `platform_item_id` from each URL (TikTok/Instagram/X patterns), dedupes
+against `content_items`, inserts new items as source `url-submitted` and enqueues
+`enrich_item` per new item — reusing the `ingest_source` insert/pseudonymize/audit path.
+**No scraping (hard rule):** a URL alone never triggers fetching page content. Items
+enter as thin records (url, platform, item id, submitted-by note); metadata/content
+hydrate later only via approved APIs (e.g. TikTok Research API lookup when the flag is
+on) or manual paste, tipline-style. Unknown author → no pseudonym mapping until real
+data arrives.
+✓ Single URL and a 3-row CSV (1 dupe, 1 invalid line) both give friendly per-row
+  results (added / duplicate / invalid — no unhandled 500s, M1.2 style); `audit_log`
+  row per batch; tests cover URL parsing per platform, dedupe, CSV edge cases
+  (BOM, ;-separated, missing `url` column); works on both DB backends.
+
+**M5.2 Auditable narrative evaluation + category Radar — DONE 2026-07-21**
+Six-category evaluation (false info / illegal content / fundamental rights / civic
+discourse / minors+minorities+public health / pro-democracy) via the VERSIONED prompt
+`app/prompts/narrative_eval_v1.md` — sha256 stored with every verdict (enrichment stage
+`narrative_eval`). No fact-check verdicts generated (hard rule 3): false_information
+only records tracked-narrative matches. Radar groups narratives by category incl. a
+Pro-democracy section; topics expand to show per-channel extraction (speech/on-screen/
+caption) and the evaluation chips; narratives addable from the UI with a category.
+✓ Prompt file party-neutral (tested); mock/real parity; quarantine on invalid output.
+
 ## Parked (decisions needed first)
 
 - X connector — waiting on DSA Art. 40 application outcome.
 - Instagram signals table — waiting on Meta Content Library approval.
+- Instagram ingestion adapter — a `MediaPost` producer for `app/extract.py` (like
+  `connectors.tiktok_media_post`). Blocked on the same Meta Content Library approval;
+  no scraping. Extraction itself is already platform-agnostic (fixture-proven), so
+  this is adapter-only work.
 - Messenger tipline (WhatsApp/Telegram) — Phase 2 per plan.
 - C2PA media signing — arrives with Studio media generation (Phase 2).

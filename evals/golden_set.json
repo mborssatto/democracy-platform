@@ -1,6 +1,6 @@
 {
   "version": "v1",
-  "description": "Golden set for the triage + classify stages. Hand-labeled German social-media-style posts: ~6 per tracked narrative (mixing keyword-heavy phrasing with paraphrases that avoid the exact keywords), 8 irrelevant decoys, and 4 borderline posts that are political but match no tracked narrative. label_relevant feeds the triage metrics; label_narrative feeds the classify metrics ('none' is its own class).",
+  "description": "Golden set for the triage + classify stages. Hand-labeled German social-media-style posts: ~6 per tracked narrative (mixing keyword-heavy phrasing with paraphrases that avoid the exact keywords), 8 irrelevant decoys, and 4 borderline posts that are political but match no tracked narrative. label_relevant feeds the triage metrics; label_narrative feeds the classify metrics ('none' is its own class). Includes the pro-democracy narrative wahlbeteiligung_staerken (category pro_democracy) since 2026-07-20.",
   "entries": [
     {
       "id": "g001",
@@ -253,6 +253,42 @@
       "text": "Kommunalwahl im Herbst: Die Parteien überbieten sich mal wieder mit Versprechen zur Verkehrswende.",
       "label_relevant": true,
       "label_narrative": "none"
+    },
+    {
+      "id": "g043",
+      "label_narrative": "wahlbeteiligung_staerken",
+      "label_relevant": true,
+      "text": "Geht wählen am Sonntag! Jede Stimme zählt für unsere Demokratie – nehmt eure Nachbarn mit."
+    },
+    {
+      "id": "g044",
+      "label_narrative": "wahlbeteiligung_staerken",
+      "label_relevant": true,
+      "text": "Bevor ihr das teilt: lest den Faktencheck. Wahlbeteiligung stärken heißt informiert abstimmen."
+    },
+    {
+      "id": "g045",
+      "label_narrative": "wahlbeteiligung_staerken",
+      "label_relevant": true,
+      "text": "Demokratie stärken fängt im Kleinen an: Wahlhelferin werden, zuhören, mitmachen."
+    },
+    {
+      "id": "g046",
+      "label_narrative": "wahlbeteiligung_staerken",
+      "label_relevant": true,
+      "text": "Unsere Demokratie lebt von Beteiligung – geh wählen, egal wie du dich entscheidest."
+    },
+    {
+      "id": "g047",
+      "label_narrative": "wahlbeteiligung_staerken",
+      "label_relevant": true,
+      "text": "Heute Infoabend zur Briefwahl im Gemeindezentrum: neutral erklärt, wie das Verfahren abläuft. Wahlbeteiligung stärken!"
+    },
+    {
+      "id": "g048",
+      "label_narrative": "wahlbeteiligung_staerken",
+      "label_relevant": true,
+      "text": "Faktencheck-Workshop für Erstwähler: Wie erkenne ich manipulierte Videos vor der Wahl?"
     }
   ]
 }

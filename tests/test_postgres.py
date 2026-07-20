@@ -24,11 +24,20 @@ def _postgres_reachable() -> bool:
         return False
 
 
-pytestmark = pytest.mark.skipif(
-    not _postgres_reachable(),
-    reason=f"no Postgres reachable at {db.database_url()} — "
-           "start the disposable docker db to run these tests",
-)
+from conftest import is_local_postgres_url
+
+pytestmark = [
+    pytest.mark.skipif(
+        not is_local_postgres_url(),
+        reason="DATABASE_URL points at a non-local host — these tests wipe the "
+               "schema and only ever run against a disposable LOCAL Postgres",
+    ),
+    pytest.mark.skipif(
+        is_local_postgres_url() and not _postgres_reachable(),
+        reason=f"no Postgres reachable at {db.database_url()} — "
+               "start the disposable docker db to run these tests",
+    ),
+]
 
 
 @pytest.fixture()

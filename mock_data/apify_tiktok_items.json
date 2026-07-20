@@ -1,0 +1,64 @@
+{
+  "_comment": "Recorded-shape fixture of the Apify clockworks/tiktok-scraper dataset output (docs: apify.com/clockworks/tiktok-scraper) — one video post and one slideshow (photo-mode) post. Built from the actor's documented output fields; the live overnight run 2026-07-20 validates the mapping. mediaUrls / downloadLink point at the Apify key-value store holding the downloaded files.",
+  "items": [
+    {
+      "id": "7662514861099863328",
+      "text": "How secure is Germany's mail-in voting really? #briefwahl #wahl",
+      "createTimeISO": "2026-07-18T09:15:00.000Z",
+      "webVideoUrl": "https://www.tiktok.com/@dwnews/video/7662514861099863328",
+      "authorMeta": {
+        "id": "6761100000000000001",
+        "name": "dwnews",
+        "nickName": "DW News",
+        "verified": true,
+        "fans": 1200000
+      },
+      "diggCount": 5400,
+      "shareCount": 210,
+      "playCount": 89000,
+      "commentCount": 320,
+      "collectCount": 95,
+      "musicMeta": { "musicName": "original sound", "musicAuthor": "dwnews", "musicOriginal": true },
+      "videoMeta": {
+        "height": 1024,
+        "width": 576,
+        "duration": 62,
+        "coverUrl": "https://p16-sign.tiktokcdn-us.com/cover-7662514861099863328.jpeg",
+        "downloadAddr": "https://v16m.tiktokcdn-us.com/video/7662514861099863328.mp4"
+      },
+      "mediaUrls": [
+        "https://api.apify.com/v2/key-value-stores/KVSTORE_TEST_1/records/video-dwnews-7662514861099863328"
+      ]
+    },
+    {
+      "id": "7637212512785616161",
+      "text": "Five facts about postal votes — swipe through. #briefwahl",
+      "createTimeISO": "2026-07-10T14:02:00.000Z",
+      "webVideoUrl": "https://www.tiktok.com/@dwnews/photo/7637212512785616161",
+      "authorMeta": {
+        "id": "6761100000000000001",
+        "name": "dwnews",
+        "nickName": "DW News",
+        "verified": true,
+        "fans": 1200000
+      },
+      "diggCount": 2100,
+      "shareCount": 88,
+      "playCount": 34000,
+      "commentCount": 140,
+      "collectCount": 60,
+      "musicMeta": { "musicName": "trending sound", "musicAuthor": "someartist", "musicOriginal": false },
+      "isSlideshow": true,
+      "slideshowImageLinks": [
+        {
+          "tiktokLink": "https://p16-sign.tiktokcdn-us.com/slide-7637212512785616161-1.jpeg",
+          "downloadLink": "https://api.apify.com/v2/key-value-stores/KVSTORE_TEST_1/records/slide-7637212512785616161-1"
+        },
+        {
+          "tiktokLink": "https://p16-sign.tiktokcdn-us.com/slide-7637212512785616161-2.jpeg",
+          "downloadLink": "https://api.apify.com/v2/key-value-stores/KVSTORE_TEST_1/records/slide-7637212512785616161-2"
+        }
+      ]
+    }
+  ]
+}
