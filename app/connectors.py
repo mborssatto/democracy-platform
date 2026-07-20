@@ -9,8 +9,6 @@ the real integration means changing only the fetch call, not the pipeline.
 >>> INTEGRATION POINT (X / DSA):  docs/integrations/x-dsa.md
 >>> INTEGRATION POINT (Instagram / Meta Content Library): docs/integrations/meta-content-library.md
 >>> INTEGRATION POINT (Fact-checks): docs/integrations/factcheck.md
->>> WORKING TODAY (no API needed): Zeeschuimer NDJSON import for TikTok/Instagram —
-    docs/integrations/zeeschuimer.md
 
 The tipline is NOT mocked — it's our own feature and fully works.
 """
@@ -103,108 +101,6 @@ def fetch_tipline() -> list[dict]:
         }
         for t in raw
     ]
-
-
-def followers_band(count: int | None) -> str:
-    """Band an exact follower count (we never store the exact number)."""
-    if count is None:
-        return "unknown"
-    if count < 1_000:
-        return "<1k"
-    if count < 10_000:
-        return "1k-10k"
-    if count < 100_000:
-        return "10k-100k"
-    return "100k+"
-
-
-def parse_zeeschuimer(ndjson_text: str) -> tuple[list[dict], int]:
-    """Parse a Zeeschuimer browser-extension NDJSON export into connector items.
-
-    Zeeschuimer (Digital Methods Initiative) captures public posts while a
-    researcher browses TikTok/Instagram normally and exports one JSON object
-    per line: {"source_platform": "...", "source_url": "...", "data": {raw
-    platform payload}}. This is the standard research path when platform
-    Research APIs are unavailable — no credentials stored (hard rule 1), no
-    scraping infrastructure. See docs/integrations/zeeschuimer.md.
-
-    Returns (items, skipped) — malformed or unsupported lines are counted,
-    never guessed at (quarantine-over-guess convention).
-    """
-    items, skipped = [], 0
-    for line in ndjson_text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            rec = json.loads(line)
-            platform = rec.get("source_platform", "") or ""
-            data = rec.get("data") or {}
-            if "tiktok" in platform:
-                items.append(_zs_tiktok(data))
-            elif "instagram" in platform:
-                items.append(_zs_instagram(data))
-            else:
-                skipped += 1
-        except (json.JSONDecodeError, KeyError, TypeError, ValueError):
-            skipped += 1
-    return items, skipped
-
-
-def _zs_tiktok(data: dict) -> dict:
-    author = data.get("author") or {}
-    handle = author.get("uniqueId") if isinstance(author, dict) else str(author)
-    stats = data.get("stats") or {}
-    views = int(stats.get("playCount", 0))
-    return {
-        "platform": "tiktok",
-        "platform_item_id": str(data["id"]),
-        "real_author_id": handle or "unknown",   # pseudonymized before storage
-        "followers_band": followers_band((data.get("authorStats") or {}).get("followerCount")),
-        "text": data.get("desc", ""),
-        "text_en": None,
-        # '@user' placeholder on purpose: raw handles never enter stored URLs
-        # (TikTok resolves video URLs by id regardless of the username part).
-        "url": f"https://www.tiktok.com/@user/video/{data['id']}",
-        "posted_at": _epoch_iso(data.get("createTime")),
-        "views": views,
-        "views_prev": views,   # one-shot capture: velocity unknown → 0 growth
-        "likes": int(stats.get("diggCount", 0)),
-        "comments": int(stats.get("commentCount", 0)),
-        "shares": int(stats.get("shareCount", 0)),
-    }
-
-
-def _zs_instagram(data: dict) -> dict:
-    user = data.get("user") or data.get("owner") or {}
-    caption = data.get("caption")
-    text = caption.get("text", "") if isinstance(caption, dict) else (caption or "")
-    code = data.get("code") or data.get("shortcode") or ""
-    # Photo posts have no view count; 0 keeps them below the amplification
-    # floor (conservative: we never invent reach numbers).
-    views = int(data.get("play_count") or data.get("view_count") or 0)
-    return {
-        "platform": "instagram",
-        "platform_item_id": str(data.get("pk") or data.get("id") or code),
-        "real_author_id": user.get("username", "unknown"),
-        "followers_band": followers_band(user.get("follower_count")),
-        "text": text,
-        "text_en": None,
-        "url": f"https://www.instagram.com/p/{code}/" if code else "",
-        "posted_at": _epoch_iso(data.get("taken_at")),
-        "views": views,
-        "views_prev": views,
-        "likes": int(data.get("like_count") or 0),
-        "comments": int(data.get("comment_count") or 0),
-        "shares": 0,
-    }
-
-
-def _epoch_iso(epoch) -> str:
-    import time
-    if not epoch:
-        return ""
-    return time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(int(epoch)))
 
 
 def load_factchecks() -> list[dict]:

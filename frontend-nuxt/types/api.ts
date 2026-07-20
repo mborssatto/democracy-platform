@@ -165,14 +165,6 @@ export interface IngestResult {
   enqueued: number
 }
 
-/** POST /api/import/zeeschuimer */
-export interface ImportResult {
-  parsed: number
-  new_items: number
-  enqueued: number
-  skipped_lines: number
-}
-
 /** POST /api/sync/factchecks */
 export interface FactcheckSync {
   mode: string
