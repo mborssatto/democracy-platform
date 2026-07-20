@@ -122,6 +122,8 @@
           <button class="btn btn-blue" @click="ingest('junkipedia')">Ingest Junkipedia (mock)</button>
           <button class="btn btn-blue" @click="ingest('tipline')">Ingest tipline queue</button>
           <button class="btn btn-blue" @click="syncFactchecks">Sync fact-checks (Google API)</button>
+          <label class="btn btn-ghost" style="cursor:pointer">Import Zeeschuimer export (.ndjson)
+            <input type="file" accept=".ndjson,.json,.txt" style="display:none" @change="importZeeschuimer"></label>
           <span class="meta" v-if="ingestMsg">{{ ingestMsg }}</span>
         </div>
       </div>
@@ -186,6 +188,7 @@
             <div class="row">
               <span class="pill pill-plat">{{ it.platform }}</span>
               <span class="meta">{{ it.author_pseudo }} · {{ it.author_followers_band }} followers · {{ fmt(it.views) }} views</span>
+              <a v-if="it.url" :href="it.url" target="_blank" rel="noopener noreferrer" class="meta">open original ↗</a>
             </div>
             <p class="txt">{{ lang==='de' ? it.text : (it.text_en || it.text) }}</p>
           </div>
@@ -452,6 +455,18 @@ createApp({
       await this.guard(async () => {
         const r = await api('/ingest/'+src, { method:'POST' });
         this.ingestMsg = `+${r.new_items} new items from ${src} (${r.enqueued} queued for enrichment)`;
+        this.refreshState(); this.loadQueue();
+      });
+    },
+    async importZeeschuimer(ev) {
+      const file = ev.target.files && ev.target.files[0];
+      if (!file) return;
+      const ndjson = await file.text();
+      ev.target.value = '';
+      await this.guard(async () => {
+        const r = await api('/import/zeeschuimer', { method:'POST',
+          headers:{'Content-Type':'application/json'}, body: JSON.stringify({ ndjson }) });
+        this.ingestMsg = `Zeeschuimer import: ${r.new_items} new of ${r.parsed} parsed`;
         this.refreshState(); this.loadQueue();
       });
     },

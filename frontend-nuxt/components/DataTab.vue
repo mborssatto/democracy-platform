@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // ⚙️ Data: ingest buttons, fact-check sync, pipeline run + queue depth +
 // dead-letter retry, and the tipline form.
-import type { FactcheckSync, IngestResult, PipelineLog, QueueStatus } from '~/types/api'
+import type { FactcheckSync, ImportResult, IngestResult, PipelineLog, QueueStatus } from '~/types/api'
 
 const { api } = useApi()
 const { guard, refreshState } = useAppState()
@@ -42,6 +42,27 @@ async function ingest(src: string) {
   await guard(async () => {
     const r = await api<IngestResult>('/ingest/' + src, { method: 'POST' })
     ingestMsg.value = `+${r.new_items} new items from ${src} (${r.enqueued} queued for enrichment)`
+    refreshState()
+    loadQueue()
+  })
+}
+
+async function importZeeschuimer(event: Event) {
+  // Manual capture path for TikTok/Instagram (no Research-API access needed):
+  // a Zeeschuimer .ndjson export, read client-side, posted as text.
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  const ndjson = await file.text()
+  input.value = '' // allow re-selecting the same file
+  await guard(async () => {
+    const r = await api<ImportResult>('/import/zeeschuimer', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ndjson }),
+    })
+    ingestMsg.value = `Zeeschuimer import: ${r.new_items} new of ${r.parsed} parsed`
+      + (r.skipped_lines ? ` (${r.skipped_lines} lines skipped)` : '')
     refreshState()
     loadQueue()
   })
@@ -97,8 +118,16 @@ async function submitTip() {
         <button class="btn btn-blue" @click="ingest('junkipedia')">Ingest Junkipedia (mock)</button>
         <button class="btn btn-blue" @click="ingest('tipline')">Ingest tipline queue</button>
         <button class="btn btn-blue" @click="syncFactchecks">Sync fact-checks (Google API)</button>
+        <label class="btn btn-ghost" style="cursor:pointer">
+          Import Zeeschuimer export (.ndjson)
+          <input type="file" accept=".ndjson,.json,.txt" style="display:none" @change="importZeeschuimer">
+        </label>
         <span v-if="ingestMsg" class="meta">{{ ingestMsg }}</span>
       </div>
+      <p class="hint" style="margin:8px 0 0">
+        No TikTok/Instagram API access? Capture posts while browsing with the free
+        Zeeschuimer extension and import the export here — see <b>docs/integrations/zeeschuimer.md</b>.
+      </p>
     </div>
     <div class="card">
       <h2>2 · Run the AI pipeline</h2>

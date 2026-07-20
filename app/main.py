@@ -87,11 +87,11 @@ SOURCES = {"tiktok": connectors.fetch_tiktok,
            "tipline": connectors.fetch_tipline}
 
 
-def ingest_source(con, source: str) -> dict:
-    """Fetch one source, insert new items, and enqueue an 'enrich_item' job per
-    NEW item. Shared by the ingest endpoint and the periodic scheduler."""
+def _insert_items(con, items: list[dict]) -> int:
+    """Pseudonymize + insert connector-shaped items, enqueueing an 'enrich_item'
+    job per NEW item. Returns how many were new (duplicates are skipped)."""
     new = 0
-    for item in SOURCES[source]():
+    for item in items:
         # Pseudonymize at the boundary: the real handle never enters content_items.
         pseudo_id = pseudo.pseudonymize(item["real_author_id"])
         pseudo.store_mapping(con, item["real_author_id"], pseudo_id)
@@ -108,9 +108,38 @@ def ingest_source(con, source: str) -> dict:
         if cur.rowcount:  # inserted (not a duplicate) → queue it for enrichment
             queue.enqueue(con, "enrich_item", {"item_id": cur.lastrowid})
             new += 1
+    return new
+
+
+def ingest_source(con, source: str) -> dict:
+    """Fetch one source and insert its items. Shared by the ingest endpoint
+    and the periodic scheduler."""
+    new = _insert_items(con, SOURCES[source]())
     db.audit(con, "ingestion", f"ingest_{source}", {"new_items": new, "enqueued": new})
     con.commit()
     return {"source": source, "new_items": new, "enqueued": new}
+
+
+class ZeeschuimerIn(BaseModel):
+    ndjson: str = Field(min_length=2)
+
+
+@app.post("/api/import/zeeschuimer")
+def import_zeeschuimer(body: ZeeschuimerIn, user: dict = STAFF):
+    """Manual-capture import: upload a Zeeschuimer browser-extension NDJSON
+    export (TikTok / Instagram public posts collected while browsing). This is
+    the working path to platform content while Research-API access is out of
+    reach — see docs/integrations/zeeschuimer.md. No credentials involved."""
+    items, skipped = connectors.parse_zeeschuimer(body.ndjson)
+    con = db.connect()
+    try:
+        new = _insert_items(con, items)
+        db.audit(con, user["username"], "import_zeeschuimer",
+                 {"parsed": len(items), "new_items": new, "skipped_lines": skipped})
+        con.commit()
+        return {"parsed": len(items), "new_items": new, "enqueued": new, "skipped_lines": skipped}
+    finally:
+        con.close()
 
 
 @app.post("/api/ingest/{source}")

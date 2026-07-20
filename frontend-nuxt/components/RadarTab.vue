@@ -33,6 +33,7 @@ onMounted(() => {
         <div class="row">
           <span class="pill pill-plat">{{ it.platform }}</span>
           <span class="meta">{{ it.author_pseudo }} · {{ it.author_followers_band }} followers · {{ fmt(it.views) }} views</span>
+          <a v-if="it.url" :href="it.url" target="_blank" rel="noopener noreferrer" class="meta">open original ↗</a>
         </div>
         <p class="txt">{{ lang === 'de' ? it.text : (it.text_en || it.text) }}</p>
       </div>
