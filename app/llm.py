@@ -402,20 +402,21 @@ def draft_reply(post_text: str, factcheck: dict | None, strategy: str = "empathy
             if factcheck else "No fact-check matched; stay general, cite nothing."
         )
         return _call_real(
-            "You draft a short German reply (max 70 words) to a social media post spreading "
+            "You draft a short English reply (max 70 words) to a German social media post spreading "
             f"disinformation. Strategy: {strategy} — address the person respectfully, name shared "
             "values, correct gently. Base facts ONLY on the provided fact-check. Never invent facts. "
-            "Never mention political parties or voting. This is a STARTING POINT a human will rewrite.",
+            "Never mention political parties or voting. This is a STARTING POINT a human will rewrite "
+            "(and translate to German before posting).",
             f"Post: {post_text}\n\n{fc}",
         )
     fc_line = (
-        f"Der Faktencheck von {factcheck['fact_checker']} kommt zu einem anderen Ergebnis: {factcheck['url']}"
-        if factcheck else "Es lohnt sich, die Quelle dazu genau anzuschauen."
+        f"The fact-check by {factcheck['fact_checker']} comes to a different conclusion: {factcheck['url']}"
+        if factcheck else "It's worth taking a close look at the source on this one."
     )
     return (
-        "Ich verstehe, dass das Thema Sorgen macht – das geht vielen so. "
-        f"{fc_line} Vielleicht magst du da mal reinschauen? "
-        "Ich finde, gerade bei so wichtigen Themen hilft es, wenn wir bei den Fakten bleiben."
+        "I understand why this topic feels worrying – it does for a lot of people. "
+        f"{fc_line} Maybe have a look? "
+        "Especially on topics this important, I think it helps if we stick to the facts."
     )
 
 
