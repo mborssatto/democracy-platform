@@ -113,10 +113,12 @@ def test_platform_agnostic_instagram_post():
 
 # ---------------------------------------------------------------- merged_text
 def test_merged_text_is_deterministic():
-    """Same channels in any input order render to the same document."""
+    """Same channels in any input order render to the same document.
+    Speech and overlays interleave chronologically (overlay at 1.0s lands
+    between the sentence ending at 4.2s and the one starting at 4.6s)."""
     speech = [
-        extract.SpeechSegment("zweiter Satz", 4.6, 7.1),
-        extract.SpeechSegment("erster Satz", 0.0, 4.2),
+        extract.SpeechSegment("Zweiter Satz.", 4.6, 7.1),
+        extract.SpeechSegment("Erster Satz.", 0.0, 4.2),
     ]
     on_screen = [
         extract.OnScreenText("Folie zwei", extract.SlideTextSource("slide", 2)),
@@ -127,12 +129,33 @@ def test_merged_text_is_deterministic():
     b = extract.render_merged_text(list(reversed(speech)), list(reversed(on_screen)), "Bildunterschrift")
     assert a == b
     assert a.splitlines() == [
-        "[SPEECH 0.0-4.2s] erster Satz",
-        "[SPEECH 4.6-7.1s] zweiter Satz",
+        "[SPEECH 0.0-4.2s] Erster Satz.",
         "[ON-SCREEN 1.0-3.0s] Overlay",
+        "[SPEECH 4.6-7.1s] Zweiter Satz.",
         "[SLIDE 1] Folie eins",
         "[SLIDE 2] Folie zwei",
         "[CAPTION] Bildunterschrift",
+    ]
+
+
+def test_merged_text_speech_is_fluid():
+    """ASR segments that break mid-sentence merge into one fluid line, and an
+    overlay may only intercalate once the sentence is over — never inside it."""
+    speech = [
+        extract.SpeechSegment("Die Briefwahl wird", 0.0, 1.8),
+        extract.SpeechSegment("massenhaft manipuliert,", 1.9, 3.0),
+        extract.SpeechSegment("das ist längst bewiesen.", 3.1, 4.2),
+        extract.SpeechSegment("Teilt das Video", 4.6, 5.5),  # no final punctuation
+    ]
+    on_screen = [
+        # appears at 2.0s — mid-sentence — so it must wait for the sentence end
+        extract.OnScreenText("WACHT AUF", extract.VideoTextSource("video", 2.0, 6.0)),
+    ]
+    out = extract.render_merged_text(speech, on_screen, None)
+    assert out.splitlines() == [
+        "[SPEECH 0.0-4.2s] Die Briefwahl wird massenhaft manipuliert, das ist längst bewiesen.",
+        "[ON-SCREEN 2.0-6.0s] WACHT AUF",
+        "[SPEECH 4.6-5.5s] Teilt das Video",  # trailing fragment still flushes
     ]
 
 

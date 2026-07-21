@@ -92,7 +92,7 @@ async function logout() {
         <AuditTab v-if="tab === 'audit'" />
 
         <!-- Active thresholds (from app/config.py — env-overridable, see .env.example) -->
-        <p v-if="state.config" class="meta" style="text-align:center;margin-top:20px">
+        <p v-if="state.config" class="meta" style="text-align:right;margin-top:20px;padding-right:8px">
           Active thresholds: floor {{ fmt(state.config.amplification_floor_views) }} views ·
           score ≥{{ state.config.score_threshold }} ·
           edit ≥{{ state.config.edit_gate_min_pct }}% ·

@@ -107,7 +107,20 @@ CREATE TABLE IF NOT EXISTS drafts (
     ai_seed text NOT NULL,               -- immutable AI starting point
     current_text text NOT NULL,
     status text DEFAULT 'editing',       -- editing | post_ready | posted
+    created_by text,                     -- who is writing it (queue flow)
     created_at text
+);
+-- added 2026-07-21 (response queue flow); IF NOT EXISTS never alters tables
+ALTER TABLE drafts ADD COLUMN IF NOT EXISTS created_by text;
+
+-- Personal response queue (2026-07-21): per-user list of content to react to.
+-- No claiming/locking — by owner decision, several users may draft the same item.
+CREATE TABLE IF NOT EXISTS response_queue (
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    username text NOT NULL,
+    item_id bigint NOT NULL,
+    added_at text,
+    UNIQUE (username, item_id)
 );
 
 CREATE TABLE IF NOT EXISTS draft_revisions (

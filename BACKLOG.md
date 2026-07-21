@@ -138,10 +138,20 @@ feature (not just the suite) works offline — closes the mock-by-default gap.
 Move the endpoint's TikTok/Apify-specific 503 check into the adapter registry.
 ✓ Adding adapter #2 requires no endpoint change.
 
-**M6.4 URL dedupe before acquisition**
-Skip already-acquired URLs before paying for an Apify run + extraction;
-also gives caption-only items an upgrade path to full extraction.
-✓ Resubmitting an ingested URL costs no external calls.
+**M6.4 URL dedupe before acquisition — PARTLY SUPERSEDED 2026-07-21**
+Re-submitting a known URL is now a deliberate *metrics refresh*: the
+acquisition runs and rolls the view snapshot (views_prev ← views), which
+powers the ▲ views/24h growth pill on cards. Remaining scope: an upgrade
+path from caption-only items to full extraction, and a cheaper metadata-only
+refresh (skip media download when the item exists).
+✓ (remaining) Caption-only item + same URL → full extraction appears.
+
+**M6.6 yt-dlp fallback acquisition adapter**
+Local TikTok acquisition via yt-dlp behind the ADR 0001 adapter contract —
+removes the Apify dependency (cost, outages, 402s: both bit us on 2026-07-21).
+Same prototype-only scraping exception; follower band may degrade to 'unknown'
+(yt-dlp metadata) — score reach accordingly.
+✓ `ADAPTERS` gains a second entry; URL ingestion works with `APIFY_TOKEN` unset.
 
 **M6.5 Renderer contract enforcement**
 `ExtractionResult` is directly constructible, so "all extractors MUST use

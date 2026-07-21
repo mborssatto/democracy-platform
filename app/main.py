@@ -193,10 +193,13 @@ def tipline_submit(tip: TipIn, user: dict = ANY_USER):
                      "from this platform (approved APIs only, no scraping), so your "
                      "description is what gets analyzed.")
         pseudo_id = pseudo.pseudonymize("tipline:" + tip.url)
+        # views=0 on purpose (hard rule 4): a description-only tip has no real
+        # reach metrics, so it gets analyzed but stays below the amplification
+        # floor — it can never become a response opportunity on fabricated reach.
         cur = con.execute(
             "INSERT INTO content_items (platform, platform_item_id, author_pseudo, author_followers_band, "
             "text, url, posted_at, ingested_at, views, views_prev) "
-            "VALUES ('tipline', ?, ?, 'unknown', ?, ?, ?, ?, 6000, 0)",
+            "VALUES ('tipline', ?, ?, 'unknown', ?, ?, ?, ?, 0, 0)",
             (f"tip-{abs(hash(tip.url + tip.text)) % 10**8}", pseudo_id, tip.text, tip.url, db.now(), db.now()),
         )
         queue.enqueue(con, "enrich_item", {"item_id": cur.lastrowid})
@@ -258,7 +261,7 @@ def pipeline_run(user: dict = STAFF):
         con.close()
     log["pending_before"] = pending
     if pending == 0 and drained == 0:
-        log["note"] = "Nothing new to process — ingest data first (or submit a tip)."
+        log["note"] = "Nothing new to process — ingest data first."
     return log
 
 
@@ -294,6 +297,19 @@ def retry_dead_job(job_id: int, user: dict = STAFF):
     return {"ok": True}
 
 
+def _post_payload(con, row) -> dict:
+    """One content_items row → the unified card shape the frontend renders
+    everywhere (Data, Radar, Respond queue): extraction + all analysis stages."""
+    item = dict(row)
+    item["extraction"] = media_ingest.load_extraction(con, row["id"])
+    for stage in ("summarize", "triage", "classify", "narrative_eval", "score"):
+        e = con.execute(
+            "SELECT output_json FROM enrichments WHERE item_id=? AND stage=?",
+            (row["id"], stage)).fetchone()
+        item[stage] = json.loads(e["output_json"]) if e else None
+    return item
+
+
 @app.get("/api/analyzed")
 def analyzed_posts(user: dict = STAFF):
     """Every post that went through media extraction (URL submissions), with
@@ -305,58 +321,168 @@ def analyzed_posts(user: dict = STAFF):
             "SELECT ci.* FROM content_items ci "
             "JOIN media_extractions me ON me.item_id = ci.id "
             "ORDER BY ci.id DESC").fetchall()
+        return [_post_payload(con, r) for r in rows]
+    finally:
+        con.close()
+
+
+# --------------------------------------------------------------- response queue
+class QueueAddIn(BaseModel):
+    item_id: int
+
+
+@app.get("/api/response-queue")
+def response_queue_list(user: dict = ANY_USER):
+    """The user's personal response queue: unified card data per queued item,
+    plus their own draft state (no claiming — several users may draft the
+    same item, by owner decision 2026-07-21)."""
+    con = db.connect()
+    try:
+        rows = con.execute(
+            "SELECT ci.*, rq.added_at queue_added_at FROM response_queue rq "
+            "JOIN content_items ci ON ci.id = rq.item_id "
+            "WHERE rq.username=? ORDER BY rq.id DESC", (user["username"],)).fetchall()
         out = []
         for r in rows:
-            item = dict(r)
-            item["extraction"] = media_ingest.load_extraction(con, r["id"])
-            for stage in ("summarize", "triage", "classify", "narrative_eval", "score"):
-                e = con.execute(
-                    "SELECT output_json FROM enrichments WHERE item_id=? AND stage=?",
-                    (r["id"], stage)).fetchone()
-                item[stage] = json.loads(e["output_json"]) if e else None
+            item = _post_payload(con, r)
+            opp = con.execute(
+                "SELECT id FROM opportunities WHERE item_id=?", (r["id"],)).fetchone()
+            draft = None
+            if opp:
+                draft = con.execute(
+                    "SELECT id draft_id, status FROM drafts WHERE opportunity_id=? "
+                    "AND created_by=? ORDER BY id DESC", (opp["id"], user["username"])).fetchone()
+            item["draft"] = dict(draft) if draft else None
             out.append(item)
         return out
     finally:
         con.close()
 
 
-@app.post("/api/items/{item_id}/opportunity")
-def create_opportunity(item_id: int, user: dict = STAFF):
-    """Create (or return) an open response opportunity for an analyzed item —
-    powers the ingest cards' "Draft response" button when the pipeline didn't
-    auto-create one (no narrative match, or a triaged-out verdict the staffer
-    disagrees with). The amplification floor is hard rule #4: low-reach posts
-    can never be drafted against, manual request or not."""
+@app.post("/api/response-queue")
+def response_queue_add(body: QueueAddIn, user: dict = ANY_USER):
+    """Add one analyzed item to my queue. The amplification floor applies at
+    the door (hard rule 4): low-reach content can never enter a response flow."""
     con = db.connect()
     try:
-        item = con.execute("SELECT * FROM content_items WHERE id=?", (item_id,)).fetchone()
+        item = con.execute("SELECT * FROM content_items WHERE id=?", (body.item_id,)).fetchone()
         if item is None:
-            raise HTTPException(404, f"No content item {item_id}.")
+            raise HTTPException(404, f"No content item {body.item_id}.")
         if item["views"] < config.AMPLIFICATION_FLOOR_VIEWS:
             raise HTTPException(
                 409, f"This post has {item['views']} views — below the amplification "
                      f"floor ({config.AMPLIFICATION_FLOOR_VIEWS}). Low-reach content is "
                      "never responded to: a reply would only amplify it (hard rule).")
-        existing = con.execute(
-            "SELECT * FROM opportunities WHERE item_id=?", (item_id,)).fetchone()
-        if existing:
-            return {"id": existing["id"], "status": existing["status"], "created": False}
-        score_row = con.execute(
-            "SELECT output_json FROM enrichments WHERE item_id=? AND stage='score'",
-            (item_id,)).fetchone()
-        score = json.loads(score_row["output_json"])["score"] if score_row else 0.0
-        expiry_sql, expiry_param = db.sql_expiry(config.OPPORTUNITY_EXPIRY_HOURS)
-        cur = con.execute(
+        con.execute(
             db.sql_insert_ignore(
-                "INTO opportunities (item_id, kind, score, score_breakdown, status, expires_at) "
-                f"VALUES (?,?,?,?, 'open', {expiry_sql})"),
-            (item_id, "reply", score,
-             json.dumps({"manual": f"opportunity requested by {user['username']} from the ingest view"}),
-             expiry_param),
-        )
-        db.audit(con, user["username"], "manual_opportunity", {"item_id": item_id, "score": score})
+                "INTO response_queue (username, item_id, added_at) VALUES (?,?,?)"),
+            (user["username"], body.item_id, db.now()))
+        db.audit(con, user["username"], "response_queue_add", {"item_id": body.item_id})
         con.commit()
-        return {"id": cur.lastrowid, "status": "open", "created": True}
+        return {"ok": True}
+    finally:
+        con.close()
+
+
+@app.delete("/api/response-queue/{item_id}")
+def response_queue_remove(item_id: int, user: dict = ANY_USER):
+    con = db.connect()
+    try:
+        con.execute("DELETE FROM response_queue WHERE username=? AND item_id=?",
+                    (user["username"], item_id))
+        db.audit(con, user["username"], "response_queue_remove", {"item_id": item_id})
+        con.commit()
+        return {"ok": True}
+    finally:
+        con.close()
+
+
+def _ensure_opportunity(con, item_id: int, username: str) -> dict:
+    """Get or create the opportunity for an item. The amplification floor is
+    hard rule #4: low-reach posts can never be drafted against, manual request
+    or not. Returns {id, status, created}; caller commits. Raises HTTPException."""
+    item = con.execute("SELECT * FROM content_items WHERE id=?", (item_id,)).fetchone()
+    if item is None:
+        raise HTTPException(404, f"No content item {item_id}.")
+    if item["views"] < config.AMPLIFICATION_FLOOR_VIEWS:
+        raise HTTPException(
+            409, f"This post has {item['views']} views — below the amplification "
+                 f"floor ({config.AMPLIFICATION_FLOOR_VIEWS}). Low-reach content is "
+                 "never responded to: a reply would only amplify it (hard rule).")
+    existing = con.execute(
+        "SELECT * FROM opportunities WHERE item_id=?", (item_id,)).fetchone()
+    if existing:
+        return {"id": existing["id"], "status": existing["status"], "created": False}
+    score_row = con.execute(
+        "SELECT output_json FROM enrichments WHERE item_id=? AND stage='score'",
+        (item_id,)).fetchone()
+    score = json.loads(score_row["output_json"])["score"] if score_row else 0.0
+    expiry_sql, expiry_param = db.sql_expiry(config.OPPORTUNITY_EXPIRY_HOURS)
+    cur = con.execute(
+        db.sql_insert_ignore(
+            "INTO opportunities (item_id, kind, score, score_breakdown, status, expires_at) "
+            f"VALUES (?,?,?,?, 'open', {expiry_sql})"),
+        (item_id, "reply", score,
+         json.dumps({"manual": f"opportunity requested by {username} from the ingest view"}),
+         expiry_param),
+    )
+    # Read lastrowid BEFORE the audit insert: on Postgres it is lastval(),
+    # which the next INSERT (audit_log) would overwrite.
+    new_id = cur.lastrowid
+    db.audit(con, username, "manual_opportunity", {"item_id": item_id, "score": score})
+    return {"id": new_id, "status": "open", "created": True}
+
+
+@app.post("/api/items/{item_id}/opportunity")
+def create_opportunity(item_id: int, user: dict = STAFF):
+    """Create (or return) an open response opportunity for an analyzed item —
+    see _ensure_opportunity for the rules."""
+    con = db.connect()
+    try:
+        result = _ensure_opportunity(con, item_id, user["username"])
+        con.commit()
+        return result
+    finally:
+        con.close()
+
+
+@app.post("/api/items/{item_id}/draft")
+def item_draft(item_id: int, user: dict = ANY_USER):
+    """The queue flow's one-button path: get-or-create the item's opportunity,
+    then get-or-create MY draft on it — no claiming (owner decision 2026-07-21:
+    anyone can draft anything; the edit gates still apply to every draft).
+    Returns the draft with its current text so switching cards resumes work."""
+    con = db.connect()
+    try:
+        opp = _ensure_opportunity(con, item_id, user["username"])
+        mine = con.execute(
+            "SELECT * FROM drafts WHERE opportunity_id=? AND created_by=? "
+            "ORDER BY id DESC", (opp["id"], user["username"])).fetchone()
+        if mine:
+            con.commit()  # persists the opportunity if it was just created
+            return {"draft_id": mine["id"], "ai_seed": mine["ai_seed"],
+                    "current_text": mine["current_text"], "status": mine["status"],
+                    "created": False}
+        row = con.execute(
+            """SELECT ci.text, cl.fact_checker, cl.verdict, cl.url
+               FROM content_items ci
+               LEFT JOIN claim_matches cm ON cm.item_id=ci.id
+               LEFT JOIN claims cl ON cl.id=cm.claim_id WHERE ci.id=?""",
+            (item_id,)).fetchone()
+        fc = {"fact_checker": row["fact_checker"], "verdict": row["verdict"], "url": row["url"]} \
+            if row["fact_checker"] else None
+        seed = llm.draft_reply(row["text"], fc)
+        cur = con.execute(
+            "INSERT INTO drafts (opportunity_id, kind, strategy, ai_seed, current_text, "
+            "created_by, created_at) VALUES (?,?,?,?,?,?,?)",
+            (opp["id"], "reply", "empathy", seed, seed, user["username"], db.now()))
+        # lastrowid before the audit insert (Postgres lastval() caveat)
+        draft_id = cur.lastrowid
+        db.audit(con, user["username"], "draft_created",
+                 {"item_id": item_id, "opportunity": opp["id"], "draft": draft_id})
+        con.commit()
+        return {"draft_id": draft_id, "ai_seed": seed, "current_text": seed,
+                "status": "editing", "created": True}
     finally:
         con.close()
 
@@ -414,10 +540,9 @@ def radar(user: dict = STAFF):
         prev_views = sum(r["views_prev"] for r in rows)
         items = []
         for r in rows[:6]:
-            item = dict(r) | {"score_json": r["score_json"]}
-            item["narrative_eval"] = json.loads(r["eval_json"]) if r["eval_json"] else None
-            item["extraction"] = media_ingest.load_extraction(con, r["id"])
-            items.append(item)
+            # Unified card shape (same as /api/analyzed) + score_json kept for
+            # the zero-build /demo page, which reads the raw string.
+            items.append(_post_payload(con, r) | {"score_json": r["score_json"]})
         # Empty narratives stay visible: a just-added watchlist entry must
         # show up (with 0 posts) or adding it looks broken.
         narratives.append({

@@ -1,21 +1,18 @@
 <script setup lang="ts">
 // ⚙️ Data: ingest buttons, fact-check sync, pipeline run + queue depth +
 // dead-letter retry, and the tipline form.
-import type { AnalyzedPost, CreatedOpportunity, FactcheckSync, IngestResult, Opportunity, PipelineLog, QueueStatus, UrlIngestResult } from '~/types/api'
+import type { AnalyzedPost, FactcheckSync, IngestResult, PipelineLog, QueueStatus, UrlIngestResult } from '~/types/api'
 
 const { api } = useApi()
 const { guard, refreshState } = useAppState()
-const tab = useState<string>('tab')
+const rq = useResponseQueue()
 
 const ingestMsg = ref('')
 const urlsInput = ref('')
 const urlResults = ref<UrlIngestResult | null>(null)
 const analyzed = ref<AnalyzedPost[]>([])
-const opps = ref<Opportunity[]>([])
 const pipeLog = ref<PipelineLog | null>(null)
 const queue = ref<QueueStatus | null>(null)
-const tip = ref({ url: '', text: '' })
-const tipMsg = ref('')
 
 // Poll queue depth while this tab is visible (the background worker drains
 // jobs on its own — this keeps the numbers honest). The component only exists
@@ -24,6 +21,7 @@ let timer: ReturnType<typeof setInterval> | undefined
 onMounted(() => {
   loadQueue()
   loadAnalyzed()
+  rq.load()
   timer = setInterval(loadQueue, 3000)
 })
 onUnmounted(() => clearInterval(timer))
@@ -43,29 +41,9 @@ async function loadQueue() {
 async function loadAnalyzed() {
   try {
     analyzed.value = await api<AnalyzedPost[]>('/analyzed')
-    opps.value = await api<Opportunity[]>('/opportunities')
   } catch {
     /* ignore — same silent rule as loadQueue */
   }
-}
-
-function oppFor(post: AnalyzedPost): Opportunity | null {
-  return opps.value.find(o => o.item_id === post.id) || null
-}
-
-async function claimAndDraft(post: AnalyzedPost) {
-  // Same flow as the Respond tab: claim, then jump there to write the draft.
-  // Posts without an auto-created opportunity get one on demand — the backend
-  // enforces the amplification floor and explains a refusal in the banner.
-  await guard(async () => {
-    let oppId = oppFor(post)?.id
-    if (oppId == null) {
-      const r = await api<CreatedOpportunity>(`/items/${post.id}/opportunity`, { method: 'POST' })
-      oppId = r.id
-    }
-    await api(`/opportunities/${oppId}/claim`, { method: 'POST' })
-    tab.value = 'respond'
-  })
 }
 
 async function retryJob(id: number) {
@@ -140,22 +118,6 @@ async function runPipeline() {
   })
 }
 
-async function submitTip() {
-  if (!tip.value.url) {
-    tipMsg.value = 'Please add the link to the post.'
-    return
-  }
-  await guard(async () => {
-    const r = await api<{ ok: boolean; note: string }>('/tipline', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(tip.value),
-    })
-    tipMsg.value = r.note
-    tip.value = { url: '', text: '' }
-    loadQueue()
-  })
-}
 </script>
 
 <template>
@@ -207,12 +169,13 @@ async function submitTip() {
           <h3 style="margin-bottom:2px">Analyzed posts</h3>
           <p class="hint" style="margin-bottom:0">
             Every URL-submitted post with what the system read in it — summary,
-            topic, categories, score, and the full channel transcript.
+            topic, categories, score, and the full channel transcript. Add the
+            ones you want to react to; they land on the 💬 Respond tab.
           </p>
-          <AnalyzedPostCard
+          <ContentCard
             v-for="p in analyzed" :key="p.id"
-            :post="p" :opportunity="oppFor(p)"
-            @draft="claimAndDraft"
+            :post="p" density="full" :queued="rq.queuedIds.value.has(p.id)"
+            @queue="rq.add(p.id)" @unqueue="rq.remove(p.id)"
           />
         </div>
       </div>
@@ -249,27 +212,9 @@ async function submitTip() {
         </div>
       </div>
     </div>
-    <div class="card">
-      <h2>3 · Submit a tip (working feature)</h2>
-      <p class="hint">
-        The community tipline is how citizens report posts, on any platform.
-        <b>TikTok links are downloaded and fully analyzed automatically</b> — same as
-        the URL box above. For other platforms we never scrape (approved APIs only),
-        so we can't fetch the content — describe what the post claims and that
-        description is what gets analyzed.
-      </p>
-      <input
-        v-model="tip.url"
-        placeholder="Link to the post"
-        style="width:100%;padding:9px;border:1.5px solid var(--line);border-radius:8px;margin-bottom:8px;font-size:13.5px"
-      >
-      <textarea
-        v-model="tip.text"
-        placeholder="What does the post claim? (only needed for non-TikTok links)"
-        style="min-height:70px"
-      />
-      <button class="btn btn-ghost" style="margin-top:8px" @click="submitTip">Submit tip</button>
-      <span v-if="tipMsg" class="meta"> {{ tipMsg }}</span>
-    </div>
+    <!-- Community tipline form removed from the UI 2026-07-21 (owner decision:
+         cleaner demo surface). POST /api/tipline and its tests stay — it is
+         the only ingestion path for platforms without an acquisition adapter
+         and the landing point for the parked Phase-2 messenger tipline. -->
   </div>
 </template>

@@ -69,18 +69,12 @@ export interface MediaExtraction {
   merged_text: string
 }
 
-export interface NarrativeItem {
-  id: number
-  platform: string
-  author_pseudo: string
-  author_followers_band: string | null
+/** Radar narrative items now share the unified card shape (plus the raw
+ *  score_json string kept for the zero-build /demo page). */
+export type NarrativeItem = AnalyzedPost & {
   text: string
   text_en: string | null
-  url: string | null
-  views: number
   score_json: string | null
-  narrative_eval: NarrativeEval | null
-  extraction: MediaExtraction | null
 }
 
 /** GET /api/radar — one narrative with its top items. */
@@ -96,20 +90,24 @@ export interface Narrative {
   items: NarrativeItem[]
 }
 
-/** GET /api/analyzed — a URL-submitted post with its full analysis. */
+/** GET /api/analyzed — a URL-submitted post with its full analysis.
+ *  This is THE unified card shape: /api/analyzed, radar items and the
+ *  response queue all serialize through the same backend helper. */
 export interface AnalyzedPost {
   id: number
   platform: string
   platform_item_id: string
   author_pseudo: string
   author_followers_band: string | null
+  text: string
   url: string | null
   views: number
+  views_prev: number
   posted_at: string | null
   ingested_at: string
   status: 'pending' | 'triaged_out' | 'enriched'
   extraction: MediaExtraction | null
-  summarize: { summary: string | null; topic: string | null; quarantined?: boolean } | null
+  summarize: { title?: string | null; summary: string | null; topic: string | null; quarantined?: boolean } | null
   triage: { relevant: boolean; reason: string } | null
   classify: { narrative: string; confidence: number } | null
   narrative_eval: NarrativeEval | null
@@ -120,6 +118,21 @@ export interface AnalyzedPost {
 export interface CreatedOpportunity {
   id: number
   status: Opportunity['status']
+  created: boolean
+}
+
+/** GET /api/response-queue — my queued items in unified card shape. */
+export type QueueEntry = AnalyzedPost & {
+  queue_added_at: string
+  draft: { draft_id: number; status: string } | null
+}
+
+/** POST /api/items/{id}/draft — get-or-create my draft (no claiming). */
+export interface ItemDraft {
+  draft_id: number
+  ai_seed: string
+  current_text: string
+  status: string
   created: boolean
 }
 

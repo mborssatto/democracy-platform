@@ -125,14 +125,16 @@ def enrich_item(con, item, claims, item_vector=None, claim_vectors=None,
 
 
 def backfill_summaries(con) -> int:
-    """Media items enriched before the summarize stage existed get their
-    summary/topic on the next run (idempotent — only missing ones). Shared by
-    run_pipeline and the /api/pipeline/run queue drain. Caller commits."""
+    """Media items whose summary is missing OR predates the current shape
+    (no "title" field yet) get re-summarized on the next run (idempotent —
+    the LIKE probe makes an up-to-date row a no-op). Shared by run_pipeline
+    and the /api/pipeline/run queue drain. Caller commits."""
     missing = con.execute(
         "SELECT ci.* FROM content_items ci "
         "JOIN media_extractions me ON me.item_id = ci.id "
         "WHERE ci.status != 'pending' AND NOT EXISTS "
-        "(SELECT 1 FROM enrichments e WHERE e.item_id = ci.id AND e.stage = 'summarize')"
+        "(SELECT 1 FROM enrichments e WHERE e.item_id = ci.id AND e.stage = 'summarize' "
+        " AND e.output_json LIKE '%\"title\"%')"
     ).fetchall()
     for item in missing:
         _store(con, item["id"], "summarize", llm.summarize(item["text"]))

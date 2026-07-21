@@ -1,14 +1,17 @@
 <script setup lang="ts">
-// 💬 Respond: opportunity list → claim → draft editor with the immutable AI
-// seed, debounced gate checks, edit-distance meter, copy + mark-posted.
-// The platform never posts — humans post from their own accounts (hard rule #1).
-import type { Draft, GateResult, Opportunity } from '~/types/api'
+// 💬 Respond: the response queue — content the user chose to react to (added
+// from Data/Radar), a rail of cards on the left, the draft editor on the
+// right. No claiming: anyone can draft anything (owner decision 2026-07-21);
+// the human-in-the-loop gates still apply to every draft. The platform never
+// posts — humans post from their own accounts (hard rule #1).
+import type { GateResult, ItemDraft, QueueEntry } from '~/types/api'
 
 const { api } = useApi()
-const { state, guard, fail, err, lang, fmt } = useAppState()
+const { state, guard, fail, err } = useAppState()
+const rq = useResponseQueue()
 
-const opps = ref<Opportunity[]>([])
-const activeDraft = ref<Draft | null>(null)
+const selectedId = ref<number | null>(null)
+const activeDraft = ref<ItemDraft | null>(null)
 const draftText = ref('')
 const gateResult = ref<Partial<GateResult>>({ checks: [] })
 const showPostedForm = ref(false)
@@ -16,13 +19,10 @@ const postedUrl = ref('')
 const postedMsg = ref('')
 const copied = ref(false)
 
-onMounted(loadOpps)
+onMounted(rq.load)
 
-async function loadOpps() {
-  await guard(async () => {
-    opps.value = await api<Opportunity[]>('/opportunities')
-  })
-}
+const selected = computed<QueueEntry | null>(() =>
+  rq.entries.value.find(e => e.id === selectedId.value) || null)
 
 function gateLabel(n: string): string {
   const labels: Record<string, string> = {
@@ -35,24 +35,35 @@ function gateLabel(n: string): string {
   return labels[n] || n
 }
 
-async function claimOpp(o: Opportunity) {
-  try {
-    err.value = ''
-    await api(`/opportunities/${o.id}/claim`, { method: 'POST' })
-  } catch (e) {
-    fail(e) // e.g. already claimed by someone else
-    loadOpps() // refresh so the stale card disappears
-    return
-  }
+// Her flow, step 6: clicking a card opens its draft when one exists;
+// otherwise the pane shows the Draft response button (step 4).
+function selectCard(entry: QueueEntry) {
+  if (selectedId.value === entry.id) return
+  selectedId.value = entry.id
+  activeDraft.value = null
+  showPostedForm.value = false
+  postedMsg.value = ''
+  copied.value = false
+  if (entry.draft) openDraft(entry.id)
+}
+
+async function openDraft(itemId: number) {
   await guard(async () => {
-    const d = await api<Draft>(`/opportunities/${o.id}/draft`, { method: 'POST' })
+    const d = await api<ItemDraft>(`/items/${itemId}/draft`, { method: 'POST' })
     activeDraft.value = d
-    draftText.value = d.ai_seed
+    draftText.value = d.current_text
     gateResult.value = { checks: [], edit_distance_pct: 0, post_ready: false }
-    showPostedForm.value = false
-    postedMsg.value = ''
-    copied.value = false
+    if (!d.created && d.current_text !== d.ai_seed) await saveDraft() // resume: show gate state
+    rq.load() // refresh the rail's draft badges
   })
+}
+
+function removeFromQueue(entry: { id: number }) {
+  rq.remove(entry.id)
+  if (selectedId.value === entry.id) {
+    selectedId.value = null
+    activeDraft.value = null
+  }
 }
 
 let debounceTimer: ReturnType<typeof setTimeout> | undefined
@@ -79,7 +90,7 @@ async function copyText() {
     copied.value = true
     setTimeout(() => (copied.value = false), 2000)
   } catch {
-    /* clipboard unavailable — ignore, same as the old page */
+    /* clipboard unavailable — ignore */
   }
 }
 
@@ -97,75 +108,92 @@ async function markPosted() {
       body: JSON.stringify({ posted_url: postedUrl.value }),
     })
     postedMsg.value = 'Recorded. The thread will be re-checked at +1h/+24h/+72h (full plan).'
+    rq.load()
   } catch (e) {
     postedMsg.value = ''
     fail(e)
   }
 }
-
-function backToList() {
-  activeDraft.value = null
-  loadOpps()
-}
 </script>
 
 <template>
-  <div>
-    <div v-if="!activeDraft" class="card">
-      <h2>💬 Response opportunities</h2>
-      <p class="hint">Threads where a reply would matter, ranked by the transparent score. Claim one to start.</p>
-      <div v-if="!opps.length" class="empty">No open opportunities — ingest data and run the pipeline first.</div>
-      <div v-for="o in opps" :key="o.id" class="item">
-        <div class="row">
-          <span class="pill pill-plat">{{ o.platform }}</span>
-          <span class="pill pill-score">score {{ o.score }}</span>
-          <span v-if="o.fact_checker" class="pill pill-fc">✔ fact-check available</span>
-          <span class="meta">{{ fmt(o.views) }} views · {{ o.author_followers_band }} followers</span>
-        </div>
-        <p class="txt">{{ lang === 'de' ? o.text : (o.text_en || o.text) }}</p>
-        <details class="meta" style="margin-bottom:8px">
-          <summary>Why this score?</summary>
-          <pre style="font-size:11px;margin-top:4px">{{ o.score_breakdown }}</pre>
-        </details>
-        <div class="row">
-          <button v-if="o.status === 'open'" class="btn btn-blue" @click="claimOpp(o)">Claim & draft</button>
-          <span v-else class="meta">claimed</span>
-          <a v-if="o.fc_url" :href="o.fc_url" target="_blank" class="meta">{{ o.fact_checker }}: {{ o.verdict }} ↗</a>
-        </div>
-      </div>
-    </div>
+  <div class="card">
+    <h2>💬 Response queue</h2>
+    <p class="hint">
+      Content you chose to react to. Find posts on ⚙️ Data or 📡 Radar and click
+      "Add to response queue"; here you draft your reply — the AI seed is raw
+      material, and the gates only unlock posting after you genuinely rework it.
+    </p>
 
-    <!-- draft editor -->
-    <div v-if="activeDraft" class="card">
-      <h2>✍️ Make it yours</h2>
-      <p class="hint">The AI seed below is <b>raw material, not a message</b>. The Post-ready state unlocks only
-        after you genuinely rework it — that's the human-in-the-loop gate, enforced in software.</p>
-      <div class="seed"><b>AI seed (immutable):</b><br>{{ activeDraft.ai_seed }}</div>
-      <textarea v-model="draftText" @input="debouncedCheck" />
-      <div class="meter"><div :style="{ width: Math.min(100, gateResult.edit_distance_pct || 0) + '%' }" /></div>
-      <p class="meta">Edit distance: {{ gateResult.edit_distance_pct || 0 }}% (need ≥{{ state.config ? state.config.edit_gate_min_pct : 15 }}% + substantive rework)</p>
-      <div v-for="c in gateResult.checks" :key="c.name" class="gate" :class="c.passed ? 'ok' : 'fail'">
-        <span>{{ c.passed ? '✔' : '✖' }}</span><span><b>{{ gateLabel(c.name) }}:</b> {{ c.detail }}</span>
+    <div class="q-layout">
+      <!-- left rail: the queue -->
+      <div>
+        <p class="meta" style="margin:0 0 8px"><b>Queue ({{ rq.entries.value.length }})</b></p>
+        <ContentCard
+          v-for="e in rq.entries.value" :key="e.id"
+          :post="e" density="queue"
+          :selected="e.id === selectedId"
+          :draft-status="e.draft?.status || null"
+          @select="selectCard(e)"
+          @unqueue="removeFromQueue(e)"
+        />
+        <template v-if="!rq.entries.value.length">
+          <div class="q-ghost" />
+          <div class="q-ghost" />
+          <div class="q-ghost" />
+        </template>
+        <div class="q-empty">Add posts from ⚙️ Data or 📡 Radar</div>
       </div>
-      <div class="row" style="margin-top:14px">
-        <button class="btn btn-ghost" @click="saveDraft">Re-check gates</button>
-        <button class="btn btn-teal" :disabled="!gateResult.post_ready" @click="copyText">
-          {{ copied ? 'Copied ✔' : 'Copy final text' }}</button>
-        <button class="btn btn-blue" :disabled="!gateResult.post_ready" @click="showPostedForm = true">
-          I posted it myself</button>
-        <button class="btn btn-ghost" @click="backToList">Back</button>
+
+      <!-- right pane: empty state → card CTA → draft editor -->
+      <div>
+        <div v-if="!selected" class="q-empty" style="min-height:220px;display:flex;align-items:center;justify-content:center">
+          <span style="max-width:320px">
+            {{ rq.entries.value.length
+              ? 'Select a post from the queue to start or continue its draft.'
+              : 'Nothing queued yet. Find content on the Data or Radar tab and click "Add to response queue".' }}
+          </span>
+        </div>
+
+        <template v-else-if="!activeDraft">
+          <div class="item" style="margin-top:0">
+            <b style="font-size:13.5px">{{ (selected.url || '').replace(/^https?:\/\/(www\.)?[^/]+\//, '') || selected.platform_item_id }}</b>
+            <p class="txt">{{ selected.summarize?.summary || selected.extraction?.caption || selected.text }}</p>
+            <button class="btn btn-blue" @click="openDraft(selected.id)">Draft response</button>
+          </div>
+        </template>
+
+        <template v-else>
+          <h3 style="margin:0 0 4px">✍️ Make it yours</h3>
+          <p class="hint">The AI seed below is <b>raw material, not a message</b>. The Post-ready state unlocks only
+            after you genuinely rework it — that's the human-in-the-loop gate, enforced in software.</p>
+          <div class="seed"><b>AI seed (immutable):</b><br>{{ activeDraft.ai_seed }}</div>
+          <textarea v-model="draftText" @input="debouncedCheck" />
+          <div class="meter"><div :style="{ width: Math.min(100, gateResult.edit_distance_pct || 0) + '%' }" /></div>
+          <p class="meta">Edit distance: {{ gateResult.edit_distance_pct || 0 }}% (need ≥{{ state.config ? state.config.edit_gate_min_pct : 15 }}% + substantive rework)</p>
+          <div v-for="c in gateResult.checks" :key="c.name" class="gate" :class="c.passed ? 'ok' : 'fail'">
+            <span>{{ c.passed ? '✔' : '✖' }}</span><span><b>{{ gateLabel(c.name) }}:</b> {{ c.detail }}</span>
+          </div>
+          <div class="row" style="margin-top:14px">
+            <button class="btn btn-ghost" @click="saveDraft">Re-check gates</button>
+            <button class="btn btn-teal" :disabled="!gateResult.post_ready" @click="copyText">
+              {{ copied ? 'Copied ✔' : 'Copy final text' }}</button>
+            <button class="btn btn-blue" :disabled="!gateResult.post_ready" @click="showPostedForm = true">
+              I posted it myself</button>
+          </div>
+          <p class="meta" style="margin-top:8px">The platform has no post button and stores no passwords —
+            you post from your own account, then paste the link:</p>
+          <div v-if="showPostedForm" class="row" style="margin-top:8px">
+            <input
+              v-model="postedUrl"
+              placeholder="https://... link to your posted reply"
+              style="flex:1;padding:9px;border:1.5px solid var(--line);border-radius:8px;font-size:13px"
+            >
+            <button class="btn btn-blue" @click="markPosted">Confirm</button>
+          </div>
+          <p v-if="postedMsg" class="gate ok" style="margin-top:8px">✔ {{ postedMsg }}</p>
+        </template>
       </div>
-      <p class="meta" style="margin-top:8px">The platform has no post button and stores no passwords —
-        you post from your own account, then paste the link:</p>
-      <div v-if="showPostedForm" class="row" style="margin-top:8px">
-        <input
-          v-model="postedUrl"
-          placeholder="https://... link to your posted reply"
-          style="flex:1;padding:9px;border:1.5px solid var(--line);border-radius:8px;font-size:13px"
-        >
-        <button class="btn btn-blue" @click="markPosted">Confirm</button>
-      </div>
-      <p v-if="postedMsg" class="gate ok" style="margin-top:8px">✔ {{ postedMsg }}</p>
     </div>
   </div>
 </template>

@@ -144,7 +144,19 @@ CREATE TABLE IF NOT EXISTS drafts (
     ai_seed TEXT NOT NULL,               -- immutable AI starting point
     current_text TEXT NOT NULL,
     status TEXT DEFAULT 'editing',       -- editing | post_ready | posted
+    created_by TEXT,                     -- who is writing it (queue flow)
     created_at TEXT
+);
+
+-- Personal response queue (2026-07-21): the Respond tab is a per-user list of
+-- content the user chose to react to. No claiming/locking — by owner decision,
+-- several users may draft against the same item.
+CREATE TABLE IF NOT EXISTS response_queue (
+    id INTEGER PRIMARY KEY,
+    username TEXT NOT NULL,
+    item_id INTEGER NOT NULL,
+    added_at TEXT,
+    UNIQUE (username, item_id)
 );
 
 CREATE TABLE IF NOT EXISTS draft_revisions (
@@ -331,6 +343,11 @@ def init_db() -> None:
         # here. SQLite has no ADD COLUMN IF NOT EXISTS → try/except.
         try:
             con.execute("ALTER TABLE narratives ADD COLUMN category TEXT DEFAULT 'false_information'")
+        except Exception:
+            pass  # column already there
+        # Column added 2026-07-21 (response queue: per-user drafts, no claiming)
+        try:
+            con.execute("ALTER TABLE drafts ADD COLUMN created_by TEXT")
         except Exception:
             pass  # column already there
     con.commit()

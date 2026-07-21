@@ -327,30 +327,36 @@ def summarize(text: str) -> dict:
             "may carry labeled channels ([SPEECH]/[ON-SCREEN]/[SLIDE]/[CAPTION]). "
             "First work out what the post is ABOUT — including the implicit message "
             "its framing conveys (what it treats as good or bad without saying so). "
-            'Output JSON {"summary": str, "topic": str} — summary: 2 plain-English '
-            "sentences: what the post shows, then what its framing conveys when that "
-            "adds meaning (e.g. reporting that commemorates resistance against a "
+            'Output JSON {"title": str, "summary": str, "topic": str} — title: a '
+            "4-8 word plain headline naming what the post is about (sentence case, "
+            "no hashtags, no trailing period). summary: 2 plain-English sentences: "
+            "what the post shows, then what its framing conveys when that adds "
+            "meaning (e.g. reporting that commemorates resistance against a "
             "dictatorship implicitly portrays that regime as wrong). Attribute the "
             "message to the post — never editorialize in your own voice. "
             "topic: the ONE general theme in 1-3 lowercase English words "
             "(e.g. 'elections', 'immigration', 'historical memory', 'public health').",
             text, deep=True,
         )
-        summary, topic = out.get("summary"), out.get("topic")
-        if not isinstance(summary, str) or not summary.strip() \
+        title, summary, topic = out.get("title"), out.get("summary"), out.get("topic")
+        if not isinstance(title, str) or not title.strip() \
+                or not isinstance(summary, str) or not summary.strip() \
                 or not isinstance(topic, str) or not topic.strip():
-            return {"quarantined": True, "summary": None, "topic": None}
+            return {"quarantined": True, "title": None, "summary": None, "topic": None}
         # Models sometimes return a comma list despite "ONE theme" — keep the
         # primary one so the topic pill stays a label, not a paragraph.
         topic = topic.split(",")[0].strip().lower()
-        return {"summary": summary.strip(), "topic": topic}
+        return {"title": title.strip().rstrip("."), "summary": summary.strip(), "topic": topic}
 
-    # Mock: first channel-stripped line as summary, topic via the keyword map.
+    # Mock: first channel-stripped line as summary, topic via the keyword map,
+    # title = the summary's first words (deterministic).
     plain = re.sub(r"\[(SPEECH|ON-SCREEN|SLIDE|CAPTION)[^\]]*\]\s*", "", text).strip()
     first = plain.splitlines()[0].strip() if plain else text.strip()
     summary = first if len(first) <= 160 else first[:157] + "…"
+    words = summary.split()
+    title = " ".join(words[:7]) + ("…" if len(words) > 7 else "")
     topic = _TOPIC_BY_NARRATIVE.get(classify(text)["narrative"], "general")
-    return {"summary": summary, "topic": topic}
+    return {"title": title, "summary": summary, "topic": topic}
 
 
 def triage(text: str) -> dict:

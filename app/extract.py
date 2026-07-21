@@ -24,6 +24,7 @@ photo post with the same asset shapes extract identically.
 """
 import json
 import os
+import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
@@ -103,23 +104,56 @@ class ExtractionResult:
 
 
 # ------------------------------------------------------------------ merged_text
+# A sentence is over when the text ends in terminal punctuation (optionally
+# followed by a closing quote/bracket). ASR segments are split by pauses, not
+# grammar, so this is what lets us re-assemble fluid sentences.
+_SENTENCE_END = re.compile(r"[.!?…](?:[\"'»«„“)\]]+)?$")
+
+
+def _speech_sentences(speech) -> list:
+    """Merge time-ordered ASR segments into complete sentences.
+
+    Segments are pause-delimited and routinely break mid-sentence; readers (and
+    the LLM stages) get fluid text by joining segments until one ends a
+    sentence. Returns (text, start_s, end_s) per sentence run; a trailing
+    fragment with no terminal punctuation still flushes so nothing is lost.
+    """
+    sentences, texts, start, end = [], [], 0.0, 0.0
+    for seg in sorted(speech, key=lambda s: (s.start_s, s.end_s, s.text)):
+        text = seg.text.strip()
+        if not texts:
+            start = seg.start_s
+        texts.append(text)
+        end = seg.end_s
+        if _SENTENCE_END.search(text):
+            sentences.append((" ".join(texts), start, end))
+            texts = []
+    if texts:
+        sentences.append((" ".join(texts), start, end))
+    return sentences
+
+
 def render_merged_text(speech, on_screen_text, caption) -> str:
     """Deterministic plain-text rendering of ALL channels, one line each.
 
     Every extractor MUST build merged_text through this function — sharing the
     renderer means implementations can only disagree about content, never
     format, and determinism is testable in one place. Ordering is fixed:
-    speech by time, video overlays by time, slides by index, caption last.
+    speech sentences and video overlays interleaved chronologically — but the
+    channels only alternate once a sentence is over, so speech reads fluidly —
+    then slides by index, caption last.
     """
-    lines = []
-    for seg in sorted(speech, key=lambda s: (s.start_s, s.end_s, s.text)):
-        lines.append(f"[SPEECH {seg.start_s:.1f}-{seg.end_s:.1f}s] {seg.text}")
     video_texts = [t for t in on_screen_text if t.source.type == "video"]
     slide_texts = [t for t in on_screen_text if t.source.type == "slide"]
-    for t in sorted(video_texts, key=lambda t: (t.source.first_seen_s, t.source.last_seen_s, t.text)):
-        lines.append(
-            f"[ON-SCREEN {t.source.first_seen_s:.1f}-{t.source.last_seen_s:.1f}s] {t.text}"
-        )
+    events = [
+        (start, 0, f"[SPEECH {start:.1f}-{end:.1f}s] {text}")
+        for text, start, end in _speech_sentences(speech)
+    ] + [
+        (t.source.first_seen_s, 1,
+         f"[ON-SCREEN {t.source.first_seen_s:.1f}-{t.source.last_seen_s:.1f}s] {t.text}")
+        for t in video_texts
+    ]
+    lines = [line for _, _, line in sorted(events)]
     for t in sorted(slide_texts, key=lambda t: (t.source.index, t.text)):
         lines.append(f"[SLIDE {t.source.index}] {t.text}")
     if caption:

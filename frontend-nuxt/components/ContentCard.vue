@@ -1,13 +1,24 @@
 <script setup lang="ts">
-// One URL-submitted post as a card: link, summary, category/topic pills,
-// score breakdown bars, metrics, and the expandable channel transcript.
-// Summary + topic render "—" until the backend produces them (pipeline TODO).
-import type { AnalyzedPost, EvalCategory, Opportunity } from '~/types/api'
+// THE unified content card — one visual language for an analyzed post across
+// all tabs, varying only by density:
+//   full    — Data tab: everything incl. score bars + expandable transcript
+//   compact — Radar lists: summary + pills + score number, transcript chevron
+//   queue   — Respond rail: small clickable card with remove ✕
+// All densities share the same header anatomy, pill order and score colors.
+import type { AnalyzedPost, EvalCategory } from '~/types/api'
 
-const props = defineProps<{ post: AnalyzedPost; opportunity: Opportunity | null }>()
-const emit = defineEmits<{ draft: [post: AnalyzedPost] }>()
+const props = withDefaults(defineProps<{
+  post: AnalyzedPost
+  density?: 'full' | 'compact' | 'queue'
+  queued?: boolean
+  selected?: boolean
+  draftStatus?: string | null
+}>(), { density: 'full', queued: false, selected: false, draftStatus: null })
+
+const emit = defineEmits<{ queue: [post: AnalyzedPost]; unqueue: [post: AnalyzedPost]; select: [post: AnalyzedPost] }>()
 
 const open = ref(false)
+const expanded = ref(false)  // summary "read more" state
 
 const CAT_LABEL: Record<EvalCategory, string> = {
   false_information: 'False information',
@@ -21,7 +32,7 @@ const CAT_LABEL: Record<EvalCategory, string> = {
 
 // "https://www.tiktok.com/@dw/video/123" → "@dw/video/123"
 const linkLabel = computed(() =>
-  (props.post.url || '').replace(/^https?:\/\/(www\.)?[^/]+\//, '') || props.post.url || '')
+  (props.post.url || '').replace(/^https?:\/\/(www\.)?[^/]+\//, '') || props.post.url || props.post.platform_item_id)
 
 const categories = computed<{ cat: EvalCategory; rationale: string }[]>(() => {
   const ev = props.post.narrative_eval
@@ -29,6 +40,16 @@ const categories = computed<{ cat: EvalCategory; rationale: string }[]>(() => {
   return (Object.entries(ev.categories) as [EvalCategory, { applies: boolean; rationale: string }][])
     .filter(([, v]) => v.applies)
     .map(([cat, v]) => ({ cat, rationale: v.rationale }))
+})
+
+// Views growth since the previous snapshot — the Radar pill Mari asked to
+// keep on the card. Computable once TWO snapshots exist (views_prev > 0);
+// re-submitting a URL rolls the snapshot (media_ingest.process_url).
+const growthPct = computed(() => {
+  const { views, views_prev: prev } = props.post
+  if (!prev || views <= prev) return null
+  const pct = Math.round(100 * (views - prev) / prev)
+  return pct >= 1 ? pct : null
 })
 
 // Score component maxima + hover explanations mirror app/pipeline.py _score()
@@ -85,40 +106,67 @@ const transcript = computed(() => {
   return rows
 })
 
-// Draftable unless someone already claimed it (no opportunity yet is fine —
-// the backend creates one on demand; the amplification floor is enforced
-// there and surfaces as a clear error banner).
-const claimable = computed(() => !props.opportunity || props.opportunity.status === 'open')
-const claimHint = computed(() =>
-  claimable.value ? '' : `Already claimed by ${props.opportunity!.claimed_by}`)
-
 const posted = computed(() => (props.post.posted_at || '').slice(0, 10))
 const analyzed = computed(() => (props.post.ingested_at || '').slice(0, 10))
+const summary = computed(() => props.post.summarize?.summary || null)
+// Card headline: the short topic title from the summarize stage; the raw
+// link label is only the fallback for posts summarized before titles existed.
+const title = computed(() => props.post.summarize?.title || linkLabel.value)
+// Rough clamp heuristic: only offer "read more" when the text will overflow
+// the 2-line clamp (~150 chars at card width).
+const clampable = computed(() => (summary.value?.length || 0) > 150)
 </script>
 
 <template>
-  <div class="item" style="margin-top:10px">
+  <!-- queue density: small clickable card in the Respond rail -->
+  <div
+    v-if="density === 'queue'"
+    class="qcard" :class="{ 'qcard-sel': selected }"
+    @click="emit('select', post)"
+  >
+    <div class="row" style="justify-content:space-between;gap:6px;flex-wrap:nowrap">
+      <span class="qlink">{{ title }}</span>
+      <button class="qx" title="Remove from queue" @click.stop="emit('unqueue', post)">✕</button>
+    </div>
+    <p class="qsum">{{ summary || post.extraction?.caption || post.text }}</p>
+    <p class="qmeta">
+      <span v-if="post.score" :class="'score-' + scoreBand" style="font-weight:600">{{ post.score.score }}</span>
+      <template v-if="post.summarize?.topic"> · {{ post.summarize.topic }}</template>
+      <template v-if="draftStatus"> · <em>{{ draftStatus === 'post_ready' ? 'post-ready' : draftStatus === 'posted' ? 'posted' : 'drafting' }}</em></template>
+    </p>
+  </div>
+
+  <!-- full + compact densities -->
+  <div v-else class="item ccard">
     <div class="row" style="justify-content:space-between;align-items:flex-start;flex-wrap:nowrap;gap:12px">
       <div style="min-width:0">
-        <a v-if="post.url" :href="post.url" target="_blank" rel="noopener" style="font-size:13.5px;font-weight:600">{{ linkLabel }} ↗</a>
+        <span style="font-size:13.5px;font-weight:600">{{ title }}</span>
+        <a v-if="post.url" :href="post.url" target="_blank" rel="noopener" class="see-post">see post ↗</a>
         <div class="meta" style="margin-top:2px">
           {{ post.platform }} · {{ post.author_pseudo }}
-          <template v-if="posted"> · posted {{ posted }}</template> · analyzed {{ analyzed }}
+          <template v-if="posted"> · posted {{ posted }}</template>
+          <template v-if="analyzed"> · analyzed {{ analyzed }}</template>
         </div>
       </div>
       <button
+        v-if="!queued"
         class="btn btn-blue"
         style="flex-shrink:0"
-        :disabled="!claimable"
-        :title="claimHint"
-        @click="claimable && emit('draft', post)"
-      >Draft response</button>
+        @click="emit('queue', post)"
+      >+ Add to response queue</button>
+      <button
+        v-else
+        class="btn btn-ghost"
+        style="flex-shrink:0"
+        title="Remove from your response queue"
+        @click="emit('unqueue', post)"
+      >✓ In queue</button>
     </div>
 
-    <p v-if="post.summarize?.summary" class="txt">{{ post.summarize.summary }}</p>
-    <p v-else class="txt" style="color:var(--muted)">
-      Summary: — (run the pipeline to generate it)
-    </p>
+    <p v-if="summary" class="txt ctxt" :class="{ 'txt-clamp': clampable && !expanded }">{{ summary }}</p>
+    <p v-else class="txt ctxt" style="color:var(--muted)">Summary: — (run the pipeline to generate it)</p>
+    <button v-if="clampable" class="chev" style="margin-bottom:4px" @click="expanded = !expanded">
+      {{ expanded ? '▴ less' : '▾ read more' }}</button>
 
     <div class="row" style="gap:6px;flex-wrap:wrap;align-items:center">
       <span
@@ -129,11 +177,13 @@ const analyzed = computed(() => (props.post.ingested_at || '').slice(0, 10))
       <span v-if="post.narrative_eval && !post.narrative_eval.quarantined && !categories.length" class="pill pill-ok">no category applies</span>
       <span v-if="post.narrative_eval?.quarantined" class="pill pill-warn">⚠ evaluation quarantined</span>
       <span class="pill pill-plat">Topic: {{ post.summarize?.topic || '—' }}</span>
+      <span v-if="growthPct !== null" class="pill pill-growth">▲ {{ growthPct }}% views/24h</span>
+      <span v-if="density === 'compact' && post.score" class="pill" :class="'score-' + scoreBand" :title="'Priority score ' + post.score.score + ' — expand on the Data tab for the breakdown'">score {{ post.score.score }}</span>
       <span class="meta">👥 {{ post.author_followers_band || '?' }} followers</span>
       <span class="meta">👁 {{ post.views.toLocaleString() }} views</span>
     </div>
 
-    <div v-if="post.score" class="score-strip">
+    <div v-if="density === 'full' && post.score" class="score-strip">
       <span class="score-num" :class="'score-' + scoreBand">
         {{ post.score.score }}
         <em>{{ scoreBand }} priority</em>
@@ -147,7 +197,7 @@ const analyzed = computed(() => (props.post.ingested_at || '').slice(0, 10))
         <span class="meta">{{ p.pts }}/{{ p.max }}</span>
       </span>
     </div>
-    <p v-else-if="post.status === 'triaged_out'" class="meta" style="margin-top:8px" :title="post.triage?.reason">
+    <p v-else-if="density === 'full' && post.status === 'triaged_out'" class="meta" style="margin-top:8px" :title="post.triage?.reason">
       Not scored — triaged out as not relevant to the monitored discourse.
     </p>
 

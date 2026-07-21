@@ -27,15 +27,18 @@ DB_BACKEND=sqlite .venv/bin/python run.py
 3. Talk over the wait (~3 min measured: ~2.5 min download + video
    extraction, ~25 s pipeline): the job queue is visible on the same tab —
    point at queued → running → done, and mention dead-letter + retry.
-4. The result appears right there under **"Analyzed posts"** (same box): a
-   card with the short link, category pills (hover for the AI's rationale),
-   followers/views, the score strip with proportional bars (velocity/reach/
-   fact-check/confidence against their real maxima), and the transcript
-   behind the ▸ chevron — timestamped Speech / On-screen / Slide / Caption
-   rows. High-scoring posts with an open opportunity get a live **Draft
-   response** button that jumps into the Respond flow.
-5. Same data also in 📡 Radar → "🎬 Analyzed media posts" with the prompt
-   version + sha256 on the evaluation chips.
+4. The result appears right there under **"Analyzed posts"** (same box): the
+   unified content card — an AI headline title + "see post ↗" link, the
+   summary behind "read more", topic + category pills (hover for the
+   rationale), the ▲ views/24h growth pill, score strip with proportional
+   bars, and the transcript behind the ▸ chevron. On 📡 Radar the same card
+   (compact) is filed under every evaluation category its verdict flags —
+   the DW memorial video appears under BOTH Hate speech and Pro-democracy.
+5. Click **"+ Add to response queue"** on any card → 💬 Respond shows your
+   queue as a rail on the left; select a card, **Draft response**, and the
+   editor opens beside it (the card stays visible; switching cards switches
+   drafts). No claiming — anyone can draft anything; the edit gates still
+   guard posting.
 
 ## Story arc that lands well (10 min)
 

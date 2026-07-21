@@ -137,7 +137,7 @@ def process_url(con, url: str) -> dict:
         raise ValueError(f"no ingestion adapter claims URL: {url}")
     adapter = ADAPTERS[platform]
     extractor = extract.get_extractor()
-    new_items = 0
+    new_items = refreshed = 0
     for ingest_item, media_post in adapter["acquire"]([url], MEDIA_DIR):
         result = scrub_extraction(
             extractor.extract(media_post), ingest_item["real_author_id"])
@@ -147,9 +147,21 @@ def process_url(con, url: str) -> dict:
         item["text"] = result.merged_text or scrub_author(item["text"], item["real_author_id"])
         item_id = insert_content_item(con, item)
         if item_id is None:
-            continue  # already ingested earlier — idempotent re-run
+            # Already ingested: this re-acquisition IS a fresh metrics
+            # snapshot — roll the view counter (views_prev ← stored views,
+            # views ← fresh count; SQL assignment RHS reads the OLD row on
+            # both backends) so the views/24h growth pill becomes computable.
+            # Analysis/extraction stay untouched: the content didn't change.
+            con.execute(
+                "UPDATE content_items SET views_prev = views, views=?, "
+                "likes=?, comments=?, shares=? WHERE platform=? AND platform_item_id=?",
+                (item["views"], item["likes"], item["comments"], item["shares"],
+                 item["platform"], item["platform_item_id"]))
+            refreshed += 1
+            continue
         save_extraction(con, item_id, result)
         new_items += 1
     db.audit(con, "ingestion", "acquire_url",
-             {"url": url, "new_items": new_items, "extractor": extractor.__class__.__name__})
-    return {"url": url, "new_items": new_items}
+             {"url": url, "new_items": new_items, "refreshed": refreshed,
+              "extractor": extractor.__class__.__name__})
+    return {"url": url, "new_items": new_items, "refreshed": refreshed}

@@ -178,3 +178,83 @@ def test_manual_opportunity_below_floor_refused(client):
 
 def test_manual_opportunity_missing_item_404(client):
     assert client.post("/api/items/99999/opportunity").status_code == 404
+
+
+# ------------------------------------------------- response queue (no claiming)
+def test_response_queue_add_list_remove(client):
+    item_id = _insert_item(views=50_000)
+    r = client.post("/api/response-queue", json={"item_id": item_id})
+    assert r.status_code == 200
+    # idempotent add
+    assert client.post("/api/response-queue", json={"item_id": item_id}).status_code == 200
+    q = client.get("/api/response-queue").json()
+    assert len(q) == 1
+    assert q[0]["id"] == item_id
+    assert q[0]["draft"] is None  # nothing drafted yet
+    assert "summarize" in q[0] and "score" in q[0]  # unified card shape
+    assert client.delete(f"/api/response-queue/{item_id}").status_code == 200
+    assert client.get("/api/response-queue").json() == []
+
+
+def test_response_queue_is_per_user(client):
+    from conftest import login_headers
+    item_id = _insert_item(views=50_000)
+    client.post("/api/response-queue", json={"item_id": item_id})
+    other = login_headers(client, "responder")
+    assert client.get("/api/response-queue", headers=other).json() == []
+
+
+def test_response_queue_enforces_amplification_floor(client):
+    item_id = _insert_item(views=10)
+    r = client.post("/api/response-queue", json={"item_id": item_id})
+    assert r.status_code == 409
+    assert "amplification" in r.json()["detail"]
+
+
+def test_item_draft_get_or_create_without_claiming(client):
+    """Queue flow: one button creates opportunity + my draft; a second call
+    resumes the SAME draft (current_text preserved); no claim involved."""
+    item_id = _insert_item(views=50_000)
+    d1 = client.post(f"/api/items/{item_id}/draft").json()
+    assert d1["created"] is True and d1["ai_seed"] == d1["current_text"]
+    client.put(f"/api/drafts/{d1['draft_id']}", json={"text": "Meine eigene Antwort dazu."})
+    d2 = client.post(f"/api/items/{item_id}/draft").json()
+    assert d2["created"] is False
+    assert d2["draft_id"] == d1["draft_id"]
+    assert d2["current_text"] == "Meine eigene Antwort dazu."
+    # the opportunity was created but never claimed
+    con = db.connect()
+    try:
+        opp = con.execute("SELECT * FROM opportunities WHERE item_id=?", (item_id,)).fetchone()
+        assert opp["status"] == "open" and opp["claimed_by"] is None
+    finally:
+        con.close()
+
+
+def test_item_draft_per_user_drafts_coexist(client):
+    """No claiming: two users draft the same item independently."""
+    from conftest import login_headers
+    item_id = _insert_item(views=50_000)
+    d_staff = client.post(f"/api/items/{item_id}/draft").json()
+    other = login_headers(client, "responder")
+    d_resp = client.post(f"/api/items/{item_id}/draft", headers=other).json()
+    assert d_resp["created"] is True
+    assert d_resp["draft_id"] != d_staff["draft_id"]
+
+
+def test_tipline_items_never_become_opportunities(client):
+    """Hard rule 4: a description-only tip has no real reach metrics (views=0),
+    so it analyzes but stays below the amplification floor — no opportunity."""
+    r = client.post("/api/tipline",
+                    json={"url": "https://x.com/user/status/2",
+                          "text": "Die Briefwahl ist manipuliert, Stimmzettel gefälscht!"})
+    assert r.status_code == 200
+    client.post("/api/pipeline/run")
+    con = db.connect()
+    try:
+        item = con.execute("SELECT * FROM content_items WHERE platform='tipline'").fetchone()
+        assert item["views"] == 0
+        opp = con.execute("SELECT 1 FROM opportunities WHERE item_id=?", (item["id"],)).fetchone()
+        assert opp is None
+    finally:
+        con.close()

@@ -158,6 +158,29 @@ def test_acquire_url_job_is_idempotent(fresh_db, monkeypatch):
         con.close()
 
 
+def test_reacquisition_rolls_view_snapshot(fresh_db, monkeypatch):
+    """Re-submitting a known URL is a metrics refresh: views_prev ← old views,
+    views ← fresh count — which is what makes the ▲ views/24h growth pill
+    computable for URL-ingested posts (two snapshots needed)."""
+    con = _run_acquire_job(monkeypatch)
+    try:
+        fresh_item, fresh_post = _fixture_pair()
+        fresh_item = dict(fresh_item, views=120_000)
+        monkeypatch.setitem(media_ingest.ADAPTERS["tiktok"], "acquire",
+                            lambda urls, dest, client=None: [(fresh_item, fresh_post)])
+        queue.enqueue(con, "acquire_url", {"url": VIDEO_URL})
+        con.commit()
+        while (job := queue.claim_next(con)) is not None:  # enrich job first, then ours
+            worker.process_job(con, job)
+        item = con.execute("SELECT * FROM content_items").fetchone()
+        assert item["views"] == 120_000
+        assert item["views_prev"] == 89_000  # the first snapshot
+        # analysis + extraction untouched (content unchanged)
+        assert con.execute("SELECT COUNT(*) c FROM media_extractions").fetchone()["c"] == 1
+    finally:
+        con.close()
+
+
 def test_acquire_url_failure_lands_in_backoff(fresh_db, monkeypatch):
     def boom(urls, dest, client=None):
         raise apify_tiktok.AcquisitionError("actor died")

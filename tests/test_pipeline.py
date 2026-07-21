@@ -86,6 +86,7 @@ def test_summarize_stage_for_every_processed_item(con):
 def test_summarize_mock_topic_maps_narrative():
     out = llm.summarize("Die Briefwahl ist gefälscht! Stimmzettel verschwinden.")
     assert out["topic"] == "elections"
+    assert out["title"] and len(out["title"].split()) <= 8  # card headline
     out2 = llm.summarize("[SPEECH 0.0-2.0s] Hallo\n[CAPTION] Rezept für Käsekuchen")
     assert out2["topic"] == "general"
     assert "[SPEECH" not in out2["summary"]  # channel labels stripped
