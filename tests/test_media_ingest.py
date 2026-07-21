@@ -173,6 +173,28 @@ def test_acquire_url_failure_lands_in_backoff(fresh_db, monkeypatch):
         con.close()
 
 
+def test_analyzed_posts_endpoint_shows_extraction_regardless_of_narrative(
+        client, fresh_db, monkeypatch):
+    """URL-submitted posts must be visible with their full analysis even when
+    they match no tracked narrative or get triaged out — the submitter needs
+    to see what the system read in the video."""
+    con = _run_acquire_job(monkeypatch)
+    while (job := queue.claim_next(con)) is not None:  # drain the enrich job too
+        worker.process_job(con, job)
+    con.commit()
+    con.close()
+
+    r = client.get("/api/analyzed")
+    assert r.status_code == 200
+    posts = r.json()
+    assert len(posts) == 1
+    post = posts[0]
+    assert post["extraction"]["extractor"] == "mock"
+    assert post["extraction"]["has_speech"] is True
+    assert post["triage"] is not None  # verdict shown even if triaged out
+    assert "narrative_eval" in post
+
+
 # ---------------------------------------------------------------- url validation
 @pytest.mark.parametrize(
     "url,ok",

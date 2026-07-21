@@ -17,6 +17,18 @@ import sqlite3
 import time
 from pathlib import Path
 
+from dotenv import load_dotenv
+
+# Bind the backend choice at process start. Several modules call load_dotenv()
+# lazily inside request paths; without this pin, EDITING .env while the app is
+# running could flip DB_BACKEND mid-process and split state across two
+# databases (it did, 2026-07-21: sessions landed in one DB, jobs in another).
+# load_dotenv never overrides an existing variable, so setting the default
+# here freezes the choice for the process lifetime. Tests still monkeypatch
+# DB_BACKEND explicitly, which always wins.
+load_dotenv()
+os.environ.setdefault("DB_BACKEND", "sqlite")
+
 DB_PATH = Path(__file__).resolve().parent.parent / "data" / "prototype.db"
 
 DEFAULT_PG_URL = "postgres://postgres:dev@localhost:54329/democracy"
@@ -296,7 +308,9 @@ def connect():
     # check_same_thread=False: the background worker (app/worker.py) opens its
     # connections on its own thread; each connection is still used by one
     # thread at a time, which is what sqlite actually requires.
-    con = sqlite3.connect(DB_PATH, check_same_thread=False)
+    # timeout=30: tolerate another thread briefly holding the single writer
+    # lock (default 5s surfaced as "database is locked" under the worker).
+    con = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=30)
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA foreign_keys = ON")
     # With the background worker on, HTTP writes and worker writes can collide;

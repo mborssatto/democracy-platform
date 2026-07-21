@@ -50,6 +50,11 @@ def startup() -> None:
     con = db.connect()
     pipeline.seed_reference_data(con)
     auth.seed_demo_users(con)
+    # Jobs left 'running' by a crash/restart mid-job (long acquire_url jobs
+    # commit their claim early — see worker.process_job) go back to 'queued'.
+    con.execute("UPDATE jobs SET status='queued', updated_at=? WHERE status='running'",
+                (db.now(),))
+    con.commit()
     con.close()
     worker.maybe_start()  # background queue drain — only when RUN_WORKER=1
 
@@ -255,6 +260,32 @@ def retry_dead_job(job_id: int, user: dict = STAFF):
     db.audit(con, "demo-user", "dead_job_retried", {"job": job_id})
     con.commit(); con.close()
     return {"ok": True}
+
+
+@app.get("/api/analyzed")
+def analyzed_posts(user: dict = STAFF):
+    """Every post that went through media extraction (URL submissions), with
+    its full analysis — shown regardless of narrative match or triage verdict,
+    so the submitter always sees what the system read in the video/slides."""
+    con = db.connect()
+    try:
+        rows = con.execute(
+            "SELECT ci.* FROM content_items ci "
+            "JOIN media_extractions me ON me.item_id = ci.id "
+            "ORDER BY ci.id DESC").fetchall()
+        out = []
+        for r in rows:
+            item = dict(r)
+            item["extraction"] = media_ingest.load_extraction(con, r["id"])
+            for stage in ("triage", "classify", "narrative_eval"):
+                e = con.execute(
+                    "SELECT output_json FROM enrichments WHERE item_id=? AND stage=?",
+                    (r["id"], stage)).fetchone()
+                item[stage] = json.loads(e["output_json"]) if e else None
+            out.append(item)
+        return out
+    finally:
+        con.close()
 
 
 # ------------------------------------------------------------------ radar

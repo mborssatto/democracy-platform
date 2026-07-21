@@ -95,6 +95,22 @@ export interface Narrative {
   items: NarrativeItem[]
 }
 
+/** GET /api/analyzed — a URL-submitted post with its full analysis. */
+export interface AnalyzedPost {
+  id: number
+  platform: string
+  platform_item_id: string
+  author_pseudo: string
+  author_followers_band: string | null
+  url: string | null
+  views: number
+  status: 'pending' | 'triaged_out' | 'enriched'
+  extraction: MediaExtraction | null
+  triage: { relevant: boolean; reason: string } | null
+  classify: { narrative: string; confidence: number } | null
+  narrative_eval: NarrativeEval | null
+}
+
 /** POST /api/ingest/urls — per-row outcome. */
 export interface UrlIngestResult {
   results: { url: string; status: 'queued' | 'invalid'; note?: string }[]

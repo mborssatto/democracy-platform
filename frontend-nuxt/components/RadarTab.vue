@@ -5,13 +5,15 @@
 // creators can SUPPORT. Topics expand to show the analyzed posts with their
 // extraction channels (speech / on-screen text / caption) and the auditable
 // per-category evaluation.
-import type { EvalCategory, Narrative, NarrativeEval } from '~/types/api'
+import type { AnalyzedPost, EvalCategory, Narrative } from '~/types/api'
 
 const { api } = useApi()
 const { guard, lang, fmt } = useAppState()
 
 const radar = ref<Narrative[]>([])
+const analyzed = ref<AnalyzedPost[]>([])
 const open = ref<Record<string, boolean>>({})
+const openPost = ref<Record<number, boolean>>({})
 const showAdd = ref(false)
 const addMsg = ref('')
 const draft = ref({
@@ -36,30 +38,20 @@ const SECTIONS: { key: EvalCategory; icon: string; title: string; hint: string }
     hint: 'Ideas creators can actively SUPPORT: nonpartisan civic information, participation, media literacy.' },
 ]
 
-const CAT_SHORT: Record<EvalCategory, string> = {
-  false_information: 'false info',
-  illegal_content: 'illegal',
-  fundamental_rights: 'fund. rights',
-  civic_discourse: 'civic discourse',
-  vulnerable_groups: 'vulnerable groups',
-  pro_democracy: 'pro-democracy',
-}
-
 const bySection = computed(() =>
   SECTIONS.map(s => ({ ...s, narratives: radar.value.filter(n => n.category === s.key) }))
     .filter(s => s.narratives.length > 0),
 )
 
-function flags(ev: NarrativeEval | null): { cat: EvalCategory; rationale: string }[] {
-  if (!ev || ev.quarantined) return []
-  return (Object.entries(ev.categories) as [EvalCategory, { applies: boolean; rationale: string }][])
-    .filter(([, v]) => v.applies)
-    .map(([cat, v]) => ({ cat, rationale: v.rationale }))
+function narrativeLabel(code: string): string {
+  const n = radar.value.find(x => x.code === code)
+  return n ? (lang.value === 'de' ? n.label_de : n.label_en) : code
 }
 
 async function load() {
   await guard(async () => {
     radar.value = await api<Narrative[]>('/radar')
+    analyzed.value = await api<AnalyzedPost[]>('/analyzed')
   })
 }
 onMounted(load)
@@ -118,6 +110,44 @@ async function addNarrative() {
 
     <div v-if="!radar.length" class="empty">No data yet — go to ⚙️ Data, ingest sources and run the pipeline.</div>
 
+    <!-- URL-submitted posts: always visible with their full analysis, even
+         when they match no tracked narrative or were triaged out. -->
+    <section v-if="analyzed.length">
+      <h3 style="margin:14px 0 2px">🎬 Analyzed media posts</h3>
+      <p class="meta" style="margin:0 0 8px">
+        Posts submitted by URL, with everything the system read in them — speech,
+        on-screen text, caption — and the auditable evaluation. Shown regardless of
+        whether they matched a tracked narrative.
+      </p>
+      <div v-for="p in analyzed" :key="p.id" class="narr" style="border-left-color:var(--teal)">
+        <div class="row" style="cursor:pointer" @click="openPost[p.id] = !openPost[p.id]">
+          <span class="meta">{{ openPost[p.id] ? '▾' : '▸' }}</span>
+          <span class="pill pill-plat">{{ p.platform }}</span>
+          <b style="font-size:13.5px">{{ p.extraction?.caption || p.platform_item_id }}</b>
+          <span
+            class="pill" :class="p.status === 'triaged_out' ? 'pill-warn' : 'pill-ok'"
+            :title="p.triage?.reason"
+          >{{ p.status === 'triaged_out' ? 'triaged out' : (p.status === 'enriched' ? 'analyzed' : 'analysis pending') }}</span>
+          <span class="meta" style="margin-left:auto">{{ p.author_pseudo }} · {{ fmt(p.views) }} views</span>
+        </div>
+        <template v-if="openPost[p.id]">
+          <div class="item">
+            <div class="row">
+              <a v-if="p.url" :href="p.url" target="_blank" rel="noopener noreferrer" class="meta">open original ↗</a>
+              <span v-if="p.classify && p.classify.narrative !== 'none'" class="meta">
+                narrative: <b>{{ narrativeLabel(p.classify.narrative) }}</b> ({{ Math.round(p.classify.confidence * 100) }}%)
+              </span>
+              <span v-else-if="p.classify" class="meta">no tracked narrative matched</span>
+            </div>
+            <div v-if="p.triage" class="gate" :class="p.triage.relevant ? 'ok' : ''" :style="p.triage.relevant ? '' : 'background:var(--amber-soft);color:var(--amber)'">
+              {{ p.triage.relevant ? '✔' : 'ℹ' }} Triage: {{ p.triage.reason }}
+            </div>
+            <AnalysisDetail :extraction="p.extraction" :evaluation="p.narrative_eval" />
+          </div>
+        </template>
+      </div>
+    </section>
+
     <section v-for="s in bySection" :key="s.key" :style="s.key === 'pro_democracy' ? 'border-top:2px solid var(--line);margin-top:18px;padding-top:12px' : ''">
       <h3 style="margin:14px 0 2px">{{ s.icon }} {{ s.title }}</h3>
       <p class="meta" style="margin:0 0 8px">{{ s.hint }}</p>
@@ -143,43 +173,9 @@ async function addNarrative() {
               <a v-if="it.url" :href="it.url" target="_blank" rel="noopener noreferrer" class="meta">open original ↗</a>
             </div>
 
-            <!-- what the post says, channel by channel -->
-            <div v-if="it.extraction" style="margin:6px 0">
-              <div v-if="it.extraction.speech.length">
-                <span class="meta"><b>🎙 Spoken</b> ({{ it.extraction.extractor }} extraction):</span>
-                <p v-for="(seg, i) in it.extraction.speech" :key="i" class="txt" style="margin:2px 0">
-                  <span class="meta">{{ seg.start_s.toFixed(1) }}–{{ seg.end_s.toFixed(1) }}s</span> {{ seg.text }}
-                </p>
-              </div>
-              <div v-else-if="!it.extraction.has_speech" class="meta">🎙 No speech detected (music/mute — nothing transcribed by design).</div>
-              <div v-if="it.extraction.on_screen_text.length" style="margin-top:4px">
-                <span class="meta"><b>🖼 On-screen text</b>:</span>
-                <p v-for="(t, i) in it.extraction.on_screen_text" :key="i" class="txt" style="margin:2px 0">
-                  <span class="meta">
-                    {{ t.source.type === 'slide' ? `slide ${t.source.index}` : `${t.source.first_seen_s.toFixed(1)}–${t.source.last_seen_s.toFixed(1)}s` }}
-                  </span>
-                  {{ t.text }}
-                </p>
-              </div>
-              <p v-if="it.extraction.caption" class="txt" style="margin:4px 0">
-                <span class="meta"><b>✏️ Caption</b>:</span> {{ it.extraction.caption }}
-              </p>
-            </div>
-            <p v-else class="txt">{{ lang === 'de' ? it.text : (it.text_en || it.text) }}</p>
-
-            <!-- auditable evaluation -->
-            <div v-if="it.narrative_eval" class="row" style="gap:6px;flex-wrap:wrap;margin-top:4px">
-              <span v-if="it.narrative_eval.quarantined" class="pill pill-warn">⚠ evaluation quarantined (invalid model output)</span>
-              <span
-                v-for="f in flags(it.narrative_eval)" :key="f.cat"
-                class="pill" :class="f.cat === 'pro_democracy' ? 'pill-ok' : 'pill-warn'"
-                :title="f.rationale"
-              >{{ f.cat === 'pro_democracy' ? '💚' : '⚠' }} {{ CAT_SHORT[f.cat] }}</span>
-              <span v-if="!it.narrative_eval.quarantined && !flags(it.narrative_eval).length" class="pill pill-ok">no category applies</span>
-              <span class="meta" :title="'prompt sha256: ' + it.narrative_eval.prompt_sha256">
-                evaluated with {{ it.narrative_eval.prompt_version }}
-              </span>
-            </div>
+            <!-- channels + auditable evaluation (shared renderer) -->
+            <p v-if="!it.extraction" class="txt">{{ lang === 'de' ? it.text : (it.text_en || it.text) }}</p>
+            <AnalysisDetail :extraction="it.extraction" :evaluation="it.narrative_eval" />
           </div>
         </template>
       </div>

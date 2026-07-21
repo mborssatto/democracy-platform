@@ -48,6 +48,12 @@ def process_job(con, job) -> dict | None:
             # M5.1: URL → Apify acquisition → media extraction → content item.
             from . import media_ingest  # lazy: keeps worker import-light
 
+            # Long job (minutes of network: Apify run + model extraction) —
+            # release the claim transaction first, or SQLite's single writer
+            # lock starves every other write ("database is locked" on login).
+            # Tradeoff: a crash mid-job leaves it 'running' (visible in the
+            # queue UI) instead of auto-requeueing; run.py resets those at boot.
+            con.commit()
             media_ingest.process_url(con, payload["url"])
         elif job["kind"] == "outcome_snapshot":
             # M4.2: re-check a thread we replied in (+1h/+24h/+72h) — mocked
