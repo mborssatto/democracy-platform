@@ -63,3 +63,7 @@ def test_openrouter_call_shape(monkeypatch):
     assert body["provider"] == {"data_collection": "deny"}
     assert body["messages"][0] == {"role": "system", "content": "system prompt"}
     assert body["messages"][1] == {"role": "user", "content": "user prompt"}
+
+    # deep=True routes interpretive stages to the deep-analysis model
+    llm._call_real("system prompt", "user prompt", deep=True)
+    assert captured["body"]["model"] == llm.OPENROUTER_DEEP_MODEL

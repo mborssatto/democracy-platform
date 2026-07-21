@@ -128,13 +128,16 @@ def ingest_urls(body: UrlsIn, user: dict = STAFF):
         results, queued = [], 0
         for url in body.urls:
             url = url.strip()
-            if media_ingest.is_tiktok_post_url(url):
+            # Adapter registry dispatch (ADR 0001): any registered platform's
+            # validator may claim the URL; today that's TikTok only.
+            if media_ingest.platform_for(url):
                 queue.enqueue(con, "acquire_url", {"url": url})
                 results.append({"url": url, "status": "queued"})
                 queued += 1
             else:
                 results.append({"url": url, "status": "invalid",
-                                "note": "not a TikTok post URL (…/@user/video/… or …/photo/…)"})
+                                "note": "no ingestion adapter for this URL "
+                                        "(TikTok …/@user/video/… or …/photo/… supported)"})
         db.audit(con, "ingestion", "ingest_urls",
                  {"submitted": len(body.urls), "queued": queued})
         con.commit()
@@ -156,25 +159,52 @@ def ingest(source: str, user: dict = STAFF):
 
 class TipIn(BaseModel):
     url: str = Field(min_length=4)
-    text: str = Field(min_length=3)
+    text: str | None = None  # required only for platforms we cannot fetch
     note: str | None = None
 
 
 @app.post("/api/tipline")
 def tipline_submit(tip: TipIn, user: dict = ANY_USER):
-    """The tipline is a REAL feature (no external integration needed)."""
+    """The tipline is a REAL feature (no external integration needed).
+
+    Two paths, decided by the URL:
+    - A platform we have an ingestion adapter for (TikTok today): the post is
+      downloaded and fully analyzed — speech, on-screen text, caption — so the
+      tipper does NOT have to describe the claim; the LLM reads the content.
+    - Any other platform: we never scrape (hard rule — approved APIs only), so
+      the tipper's description IS the content we analyze."""
     con = db.connect()
-    pseudo_id = pseudo.pseudonymize("tipline:" + tip.url)
-    cur = con.execute(
-        "INSERT INTO content_items (platform, platform_item_id, author_pseudo, author_followers_band, "
-        "text, url, posted_at, ingested_at, views, views_prev) "
-        "VALUES ('tipline', ?, ?, 'unknown', ?, ?, ?, ?, 6000, 0)",
-        (f"tip-{abs(hash(tip.url + tip.text)) % 10**8}", pseudo_id, tip.text, tip.url, db.now(), db.now()),
-    )
-    queue.enqueue(con, "enrich_item", {"item_id": cur.lastrowid})
-    db.audit(con, "community", "tipline_submission", {"url": tip.url})
-    con.commit(); con.close()
-    return {"ok": True}
+    try:
+        if media_ingest.platform_for(tip.url):
+            if not apify_tiktok.enabled():
+                raise HTTPException(
+                    503, "Video analysis is not configured (APIFY_TOKEN missing) — "
+                         "describe the claim in the text field instead.")
+            queue.enqueue(con, "acquire_url", {"url": tip.url.strip()})
+            db.audit(con, "community", "tipline_submission",
+                     {"url": tip.url, "routed": "acquire_url"})
+            con.commit()
+            return {"ok": True,
+                    "note": "TikTok post queued for full video analysis — speech, "
+                            "on-screen text and caption are read automatically."}
+        if not tip.text or len(tip.text.strip()) < 3:
+            raise HTTPException(
+                422, "Please describe what the post claims. We can't fetch content "
+                     "from this platform (approved APIs only, no scraping), so your "
+                     "description is what gets analyzed.")
+        pseudo_id = pseudo.pseudonymize("tipline:" + tip.url)
+        cur = con.execute(
+            "INSERT INTO content_items (platform, platform_item_id, author_pseudo, author_followers_band, "
+            "text, url, posted_at, ingested_at, views, views_prev) "
+            "VALUES ('tipline', ?, ?, 'unknown', ?, ?, ?, ?, 6000, 0)",
+            (f"tip-{abs(hash(tip.url + tip.text)) % 10**8}", pseudo_id, tip.text, tip.url, db.now(), db.now()),
+        )
+        queue.enqueue(con, "enrich_item", {"item_id": cur.lastrowid})
+        db.audit(con, "community", "tipline_submission", {"url": tip.url, "routed": "enrich_item"})
+        con.commit()
+        return {"ok": True, "note": "Tip received — run the pipeline to process it."}
+    finally:
+        con.close()
 
 
 @app.post("/api/sync/factchecks")
@@ -209,9 +239,11 @@ def pipeline_run(user: dict = STAFF):
                 queue.enqueue(con, "enrich_item", {"item_id": r["id"]})
         con.commit()
 
-        log = {"triage_kept": 0, "triage_dropped": 0, "classified": 0,
+        log = {"summarized": 0, "triage_kept": 0, "triage_dropped": 0, "classified": 0,
                "narrative_evaluated": 0, "claim_matched": 0, "opportunities": 0,
                "mode": llm.mode()}
+        log["summarized"] += pipeline.backfill_summaries(con)
+        con.commit()
         drained = 0
         while (job := queue.claim_next(con)) is not None:
             item_log = worker.process_job(con, job)  # commits/fails per job
@@ -277,13 +309,54 @@ def analyzed_posts(user: dict = STAFF):
         for r in rows:
             item = dict(r)
             item["extraction"] = media_ingest.load_extraction(con, r["id"])
-            for stage in ("triage", "classify", "narrative_eval"):
+            for stage in ("summarize", "triage", "classify", "narrative_eval", "score"):
                 e = con.execute(
                     "SELECT output_json FROM enrichments WHERE item_id=? AND stage=?",
                     (r["id"], stage)).fetchone()
                 item[stage] = json.loads(e["output_json"]) if e else None
             out.append(item)
         return out
+    finally:
+        con.close()
+
+
+@app.post("/api/items/{item_id}/opportunity")
+def create_opportunity(item_id: int, user: dict = STAFF):
+    """Create (or return) an open response opportunity for an analyzed item —
+    powers the ingest cards' "Draft response" button when the pipeline didn't
+    auto-create one (no narrative match, or a triaged-out verdict the staffer
+    disagrees with). The amplification floor is hard rule #4: low-reach posts
+    can never be drafted against, manual request or not."""
+    con = db.connect()
+    try:
+        item = con.execute("SELECT * FROM content_items WHERE id=?", (item_id,)).fetchone()
+        if item is None:
+            raise HTTPException(404, f"No content item {item_id}.")
+        if item["views"] < config.AMPLIFICATION_FLOOR_VIEWS:
+            raise HTTPException(
+                409, f"This post has {item['views']} views — below the amplification "
+                     f"floor ({config.AMPLIFICATION_FLOOR_VIEWS}). Low-reach content is "
+                     "never responded to: a reply would only amplify it (hard rule).")
+        existing = con.execute(
+            "SELECT * FROM opportunities WHERE item_id=?", (item_id,)).fetchone()
+        if existing:
+            return {"id": existing["id"], "status": existing["status"], "created": False}
+        score_row = con.execute(
+            "SELECT output_json FROM enrichments WHERE item_id=? AND stage='score'",
+            (item_id,)).fetchone()
+        score = json.loads(score_row["output_json"])["score"] if score_row else 0.0
+        expiry_sql, expiry_param = db.sql_expiry(config.OPPORTUNITY_EXPIRY_HOURS)
+        cur = con.execute(
+            db.sql_insert_ignore(
+                "INTO opportunities (item_id, kind, score, score_breakdown, status, expires_at) "
+                f"VALUES (?,?,?,?, 'open', {expiry_sql})"),
+            (item_id, "reply", score,
+             json.dumps({"manual": f"opportunity requested by {user['username']} from the ingest view"}),
+             expiry_param),
+        )
+        db.audit(con, user["username"], "manual_opportunity", {"item_id": item_id, "score": score})
+        con.commit()
+        return {"id": cur.lastrowid, "status": "open", "created": True}
     finally:
         con.close()
 

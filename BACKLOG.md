@@ -119,6 +119,36 @@ Pro-democracy section; topics expand to show per-channel extraction (speech/on-s
 caption) and the evaluation chips; narratives addable from the UI with a category.
 ✓ Prompt file party-neutral (tested); mock/real parity; quarantine on invalid output.
 
+## M6 — Media-ingestion follow-ups (from ADR 0001 review, 2026-07-21)
+
+Committed in `docs/adr/0001-modular-media-ingestion.md` (approved with comments);
+each is small and independent.
+
+**M6.1 Display-name scrub**
+Scrub the author's display name (Apify `authorMeta.nickName` — often spoken aloud)
+alongside the handle in `media_ingest.scrub_extraction`; carry it on `ingest_item`.
+✓ Canary-style test with the display name in speech/overlay/caption.
+
+**M6.2 Mock acquisition adapter**
+Fixture-backed `acquire()` registered when no `APIFY_TOKEN`, so the URL-ingestion
+feature (not just the suite) works offline — closes the mock-by-default gap.
+✓ `/api/ingest/urls` demoable with zero keys.
+
+**M6.3 Per-adapter `enabled()` readiness**
+Move the endpoint's TikTok/Apify-specific 503 check into the adapter registry.
+✓ Adding adapter #2 requires no endpoint change.
+
+**M6.4 URL dedupe before acquisition**
+Skip already-acquired URLs before paying for an Apify run + extraction;
+also gives caption-only items an upgrade path to full extraction.
+✓ Resubmitting an ingested URL costs no external calls.
+
+**M6.5 Renderer contract enforcement**
+`ExtractionResult` is directly constructible, so "all extractors MUST use
+`render_merged_text`" is convention — add a contract test over registered
+extractors (or build `merged_text` in `__post_init__`).
+✓ A hand-built inconsistent result fails loudly.
+
 ## Parked (decisions needed first)
 
 - X connector — waiting on DSA Art. 40 application outcome.

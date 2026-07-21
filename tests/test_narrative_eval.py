@@ -15,7 +15,7 @@ from fastapi.testclient import TestClient
 from app import db, llm, main, media_ingest, pipeline
 from conftest import login_headers
 
-PROMPT_PATH = Path(__file__).resolve().parent.parent / "app" / "prompts" / "narrative_eval_v1.md"
+PROMPT_PATH = Path(__file__).resolve().parent.parent / "app" / "prompts" / "narrative_eval_v3.md"
 
 HARM_TEXT = "Die Briefwahl ist manipuliert! Tausende Stimmzettel gefälscht — Wahlbetrug!"
 PRO_TEXT = "Geht wählen! Unsere Demokratie lebt von Beteiligung. Lest den Faktencheck dazu."
@@ -54,7 +54,7 @@ def test_prompt_hash_matches_file():
 # ------------------------------------------------------------------- mock eval
 def test_mock_eval_shape_and_audit_fields():
     out = llm.narrative_eval(HARM_TEXT)
-    assert out["prompt_version"] == "narrative_eval_v1"
+    assert out["prompt_version"] == "narrative_eval_v3"
     assert out["prompt_sha256"] == llm.narrative_eval_prompt_sha()
     assert set(out["categories"]) == set(llm.EVAL_CATEGORIES)
     for cat in out["categories"].values():
@@ -78,13 +78,25 @@ def test_mock_eval_flags_pro_democracy():
     assert cats["civic_discourse"]["applies"] is False
 
 
+def test_mock_eval_hate_speech_presence_and_pro_stance_coexist():
+    """Prompt v2 doctrine: harm categories flag PRESENCE (even in documented
+    footage); pro_democracy is the post's STANCE — they may co-apply. Example:
+    reporting that criticizes a hateful confrontation it shows."""
+    text = ('[SPEECH 22.4-25.1s] Sie waren letztes Mal schon so ein Schwein. '
+            'Lassen Sie das.\n[CAPTION] Faktencheck: was beim Gedenken geschah — '
+            'Demokratie stärken heißt hinschauen.')
+    cats = llm.narrative_eval(text)["categories"]
+    assert cats["hate_speech"]["applies"] is True
+    assert cats["pro_democracy"]["applies"] is True
+
+
 # ------------------------------------------------------------------- real eval
 def test_real_eval_sends_versioned_prompt(monkeypatch):
     monkeypatch.setattr(llm, "ANTHROPIC_KEY", "sk-ant-test")
     captured = {}
 
-    def fake_real_json(system, user):
-        captured.update(system=system, user=user)
+    def fake_real_json(system, user, deep=False):
+        captured.update(system=system, user=user, deep=deep)
         return {code: {"applies": code == "civic_discourse", "rationale": "test"}
                 for code in llm.EVAL_CATEGORIES}
 
@@ -93,6 +105,7 @@ def test_real_eval_sends_versioned_prompt(monkeypatch):
 
     assert captured["system"] == PROMPT_PATH.read_text(encoding="utf-8")
     assert captured["user"] == HARM_TEXT
+    assert captured["deep"] is True  # interpretive stage → deep-analysis model
     assert out["categories"]["civic_discourse"]["applies"] is True
     assert out["prompt_sha256"] == llm.narrative_eval_prompt_sha()
     assert "quarantined" not in out
@@ -101,11 +114,11 @@ def test_real_eval_sends_versioned_prompt(monkeypatch):
 def test_real_eval_quarantines_malformed_output(monkeypatch):
     """Repo convention: validate JSON, quarantine on failure — never guess."""
     monkeypatch.setattr(llm, "ANTHROPIC_KEY", "sk-ant-test")
-    monkeypatch.setattr(llm, "_real_json", lambda system, user: {"nonsense": True})
+    monkeypatch.setattr(llm, "_real_json", lambda system, user, deep=False: {"nonsense": True})
     out = llm.narrative_eval(HARM_TEXT)
     assert out["quarantined"] is True
     assert out["categories"] == {}
-    assert out["prompt_version"] == "narrative_eval_v1"
+    assert out["prompt_version"] == "narrative_eval_v3"
 
 
 # ------------------------------------------------- pipeline stage + categories
@@ -133,7 +146,7 @@ def test_pipeline_stores_narrative_eval_enrichment(fresh_db):
             "SELECT * FROM enrichments WHERE item_id=? AND stage='narrative_eval'",
             (item["id"],)).fetchone()
         assert row is not None
-        assert "narrative_eval_v1" in row["output_json"]
+        assert "narrative_eval_v3" in row["output_json"]
     finally:
         con.close()
 

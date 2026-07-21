@@ -26,6 +26,46 @@ def is_tiktok_post_url(url: str) -> bool:
     return bool(_TIKTOK_POST_RE.match(url.strip()))
 
 
+# Adapter registry (ADR 0001): platform → URL validator + acquisition function.
+# Adding a platform = one adapter module exposing these two callables + one
+# entry here; extraction, persistence and enrichment stay untouched.
+ADAPTERS = {
+    "tiktok": {"is_post_url": is_tiktok_post_url, "acquire": apify_tiktok.acquire},
+}
+
+
+def platform_for(url: str):
+    """The platform whose adapter claims this URL, or None (→ invalid row)."""
+    return next((p for p, a in ADAPTERS.items() if a["is_post_url"](url)), None)
+
+
+# ---------------------------------------------------------- handle scrubbing
+def scrub_author(text, real_author_id: str):
+    """Remove the author's own handle (`@handle` or bare) from extracted text.
+
+    Hard rule 5 for the media path: platforms watermark the author's @handle
+    into the video itself, and captions repeat it — so OCR/ASR would write the
+    raw handle straight into the pseudonymized tables and every downstream LLM
+    call. Other handles mentioned in content are left alone: they are content,
+    not the ingestion-boundary identity this rule protects."""
+    if not text or not real_author_id:
+        return text
+    return re.sub(r"@?\b" + re.escape(real_author_id) + r"\b", "[author]",
+                  text, flags=re.IGNORECASE)
+
+
+def scrub_extraction(result: extract.ExtractionResult, real_author_id: str):
+    """Re-build an ExtractionResult with the author handle scrubbed from every
+    channel. Goes through build_result so merged_text stays canonical."""
+    speech = [extract.SpeechSegment(scrub_author(s.text, real_author_id), s.start_s, s.end_s)
+              for s in result.speech]
+    on_screen = [extract.OnScreenText(scrub_author(t.text, real_author_id), t.source)
+                 for t in result.on_screen_text]
+    return extract.build_result(result.extractor, speech, on_screen,
+                                scrub_author(result.caption, real_author_id),
+                                result.has_speech)
+
+
 def insert_content_item(con, item: dict):
     """Pseudonymize + insert one ingest-shaped item; enqueue enrichment.
     Returns the new item id, or None when the item already existed.
@@ -89,17 +129,22 @@ def load_extraction(con, item_id: int):
 
 # -------------------------------------------------------------------- job body
 def process_url(con, url: str) -> dict:
-    """The 'acquire_url' job: acquire → extract → insert → persist channels.
+    """The 'acquire_url' job: acquire → extract → scrub → insert → persist.
     Raises on failure so the queue's backoff/dead-letter handling applies.
     Caller (worker.process_job) commits."""
+    platform = platform_for(url)
+    if platform is None:
+        raise ValueError(f"no ingestion adapter claims URL: {url}")
+    adapter = ADAPTERS[platform]
     extractor = extract.get_extractor()
     new_items = 0
-    for ingest_item, media_post in apify_tiktok.acquire([url], MEDIA_DIR):
-        result = extractor.extract(media_post)
+    for ingest_item, media_post in adapter["acquire"]([url], MEDIA_DIR):
+        result = scrub_extraction(
+            extractor.extract(media_post), ingest_item["real_author_id"])
         item = dict(ingest_item)
         # merged_text becomes the analyzed text; caption-only posts fall back
-        # to their caption so `text` is never empty (NOT NULL column).
-        item["text"] = result.merged_text or item["text"]
+        # to their (scrubbed) caption so `text` is never empty (NOT NULL column).
+        item["text"] = result.merged_text or scrub_author(item["text"], item["real_author_id"])
         item_id = insert_content_item(con, item)
         if item_id is None:
             continue  # already ingested earlier — idempotent re-run

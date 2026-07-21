@@ -28,6 +28,8 @@ const SECTIONS: { key: EvalCategory; icon: string; title: string; hint: string }
     hint: 'Match narratives already debunked by professional fact-checkers — the platform never issues its own verdicts.' },
   { key: 'illegal_content', icon: '⚖️', title: 'Illegal content',
     hint: 'Content illegal in Germany/the EU: incitement, banned symbols, credible threats.' },
+  { key: 'hate_speech', icon: '🚫', title: 'Hate speech',
+    hint: 'Dehumanizing language, slurs, degrading insults — flagged when present in content, whether the post endorses or criticizes it.' },
   { key: 'fundamental_rights', icon: '🕊️', title: 'Against fundamental rights',
     hint: 'Attacks on human dignity, equal treatment, press freedom and other fundamental rights.' },
   { key: 'civic_discourse', icon: '🗳️', title: 'Against civic discourse',

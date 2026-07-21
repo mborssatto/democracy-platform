@@ -34,6 +34,7 @@ export interface State {
 export type EvalCategory =
   | 'false_information'
   | 'illegal_content'
+  | 'hate_speech'
   | 'fundamental_rights'
   | 'civic_discourse'
   | 'vulnerable_groups'
@@ -104,11 +105,22 @@ export interface AnalyzedPost {
   author_followers_band: string | null
   url: string | null
   views: number
+  posted_at: string | null
+  ingested_at: string
   status: 'pending' | 'triaged_out' | 'enriched'
   extraction: MediaExtraction | null
+  summarize: { summary: string | null; topic: string | null; quarantined?: boolean } | null
   triage: { relevant: boolean; reason: string } | null
   classify: { narrative: string; confidence: number } | null
   narrative_eval: NarrativeEval | null
+  score: { score: number; breakdown: Record<string, number | string> } | null
+}
+
+/** POST /api/items/{id}/opportunity — manual opportunity from the ingest view. */
+export interface CreatedOpportunity {
+  id: number
+  status: Opportunity['status']
+  created: boolean
 }
 
 /** POST /api/ingest/urls — per-row outcome. */
@@ -210,6 +222,7 @@ export interface QueueStatus {
 
 /** POST /api/pipeline/run */
 export interface PipelineLog {
+  summarized: number
   triage_kept: number
   triage_dropped: number
   classified: number

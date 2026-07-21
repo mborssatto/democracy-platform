@@ -177,7 +177,10 @@ def test_tiktok_ingestion_adapter():
 # send a request without those pins.
 
 def _or_response(body: dict) -> dict:
-    return {"choices": [{"message": {"content": json.dumps(body)}}]}
+    # "provider" mirrors the real API: the name of the provider that actually
+    # served the request — _send verifies it against the allowlist post-hoc.
+    return {"provider": "Google Vertex",
+            "choices": [{"message": {"content": json.dumps(body)}}]}
 
 
 def test_openrouter_request_carries_all_routing_pins():
@@ -327,11 +330,57 @@ def test_openrouter_malformed_reply_quarantines(or_key, tmp_path):
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
-            200, json={"choices": [{"message": {"content": "not json at all"}}]}
+            200, json={"provider": "Google Vertex",
+                       "choices": [{"message": {"content": "not json at all"}}]}
         )
 
     with httpx.Client(transport=httpx.MockTransport(handler)) as client:
         with pytest.raises(orx.ExtractionError):
+            orx.OpenRouterExtractor().extract(post, client=client)
+
+
+@pytest.mark.parametrize("provider", ["Google", "Google Vertex", "google-vertex"])
+def test_openrouter_consistent_served_provider_accepted(or_key, tmp_path, provider):
+    """The response's provider field is a coarse display name — a real
+    Vertex-served response reports just "Google" (observed 2026-07-21). Names
+    consistent with the allowlist must pass."""
+    video = tmp_path / "clip.mp4"
+    video.write_bytes(b"fake")
+    post = extract.MediaPost(
+        "tiktok", "tt-ok", None, (extract.MediaAsset("video", str(video)),)
+    )
+    body = {"provider": provider,
+            "choices": [{"message": {"content": json.dumps(
+                {"speech": [], "on_screen_text": [], "has_speech": False})}}]}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=body)
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        r = orx.OpenRouterExtractor().extract(post, client=client)
+    assert r.has_speech is False
+
+
+@pytest.mark.parametrize("provider", ["SomeOtherCloud", "Google AI Studio", None])
+def test_openrouter_wrong_or_missing_served_provider_raises(or_key, tmp_path, provider):
+    """Post-hoc routing verification: the pins only prove what we ASKED for.
+    A response served inconsistently with the allowlist — or silent about who
+    served it — must raise, not be trusted."""
+    video = tmp_path / "clip.mp4"
+    video.write_bytes(b"fake")
+    post = extract.MediaPost(
+        "tiktok", "tt-p", None, (extract.MediaAsset("video", str(video)),)
+    )
+    body = {"choices": [{"message": {"content": json.dumps(
+        {"speech": [], "on_screen_text": [], "has_speech": False})}}]}
+    if provider is not None:
+        body["provider"] = provider
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=body)
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(orx.RoutingPinError):
             orx.OpenRouterExtractor().extract(post, client=client)
 
 

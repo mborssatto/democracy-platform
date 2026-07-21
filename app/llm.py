@@ -29,6 +29,15 @@ OPENROUTER_KEY = os.environ.get("OPENROUTER_API_KEY")
 # still send data_collection=deny as basic hygiene.
 OPENROUTER_REASONING_MODEL = "anthropic/claude-haiku-4.5"
 
+# Deep-analysis model for the INTERPRETIVE stages (narrative evaluation,
+# summarize): reading a post's implicit framing — what it portrays as good or
+# bad without saying so — needs a stronger model. Chosen empirically
+# 2026-07-21: a 3-prompt × 2-model matrix on real content, judged on substance
+# (implicit anti-Nazi framing named), neutrality and clarity — Sonnet passed
+# all hard rules where Haiku kept slipping on neutrality. Mechanical stages
+# (triage, classify, translate) stay on the cheap model above.
+OPENROUTER_DEEP_MODEL = "anthropic/claude-sonnet-5"
+
 
 def mode() -> str:
     if ANTHROPIC_KEY:
@@ -41,8 +50,12 @@ def mode() -> str:
 
 
 # ---------------------------------------------------------------- real backends
-def _call_real(system: str, user: str) -> str:
-    """Minimal real-model call. Returns the model's text reply."""
+def _call_real(system: str, user: str, deep: bool = False) -> str:
+    """Minimal real-model call. Returns the model's text reply.
+
+    `deep=True` routes to OPENROUTER_DEEP_MODEL on the OpenRouter backend
+    (interpretive stages); the direct Anthropic/OpenAI backends keep their
+    single model — deep-vs-cheap tiering exists only where we run for real."""
     if ANTHROPIC_KEY:
         r = httpx.post(
             "https://api.anthropic.com/v1/messages",
@@ -80,7 +93,7 @@ def _call_real(system: str, user: str) -> str:
         "https://openrouter.ai/api/v1/chat/completions",
         headers={"Authorization": f"Bearer {OPENROUTER_KEY}"},
         json={
-            "model": OPENROUTER_REASONING_MODEL,
+            "model": OPENROUTER_DEEP_MODEL if deep else OPENROUTER_REASONING_MODEL,
             "provider": {"data_collection": "deny"},
             "messages": [
                 {"role": "system", "content": system},
@@ -93,9 +106,9 @@ def _call_real(system: str, user: str) -> str:
     return r.json()["choices"][0]["message"]["content"]
 
 
-def _real_json(system: str, user: str) -> dict:
+def _real_json(system: str, user: str, deep: bool = False) -> dict:
     """Ask for JSON, parse defensively (prototype-grade)."""
-    text = _call_real(system + " Reply with ONLY valid JSON, no prose.", user)
+    text = _call_real(system + " Reply with ONLY valid JSON, no prose.", user, deep=deep)
     match = re.search(r"\{.*\}", text, re.S)
     return json.loads(match.group(0)) if match else {}
 
@@ -186,13 +199,21 @@ NARRATIVE_KEYWORDS = {
 EVAL_CATEGORIES = (
     "false_information",   # matches a tracked debunked narrative — NO new verdicts
     "illegal_content",     # illegal in DE/EU: incitement, banned symbols, threats
+    "hate_speech",         # dehumanizing/degrading speech PRESENT (even if criticized)
     "fundamental_rights",  # attacks dignity, equal treatment, press freedom...
     "civic_discourse",     # delegitimizes elections/participation without evidence
     "vulnerable_groups",   # threatens minors, minorities, or public health
-    "pro_democracy",       # SUPPORTS democratic values (nonpartisan)
+    "pro_democracy",       # the post's overall STANCE supports democratic values
 )
 
-_PROMPT_PATH = Path(__file__).resolve().parent / "prompts" / "narrative_eval_v1.md"
+# v2 (2026-07-21): + hate_speech category, + presence-vs-stance doctrine (harm
+# categories flag what the content CONTAINS — even documented/criticized
+# footage; pro_democracy is the post's stance and may co-apply).
+# v3 (2026-07-21): + "understand before judging" two-step — read the post's
+# implicit message (what its framing portrays as good/bad, e.g. commemorating
+# anti-Nazi resistance = portraying the regime as wrong) before applying
+# categories. Winner of a judged 3-prompt × 2-model matrix on real content.
+_PROMPT_PATH = Path(__file__).resolve().parent / "prompts" / "narrative_eval_v3.md"
 _prompt_cache: dict = {}
 
 
@@ -219,6 +240,7 @@ PRO_NARRATIVE_CODES = {"wahlbeteiligung_staerken"}
 
 _EVAL_MOCK_KEYWORDS = {
     "illegal_content": ["gewalt gegen", "vernichten", "aufhängen", "waffe"],
+    "hate_speech": ["schwein", "abschaum", "ungeziefer", "volksverräter", "ratten"],
     "fundamental_rights": ["lügenpresse", "zensur", "systemmedien", "menschenwürde"],
     "civic_discourse": ["wahlbetrug", "briefwahl", "stimmzettel", "wahl manipuliert",
                         "wählt nicht", "wahlen sind sinnlos"],
@@ -238,7 +260,7 @@ def narrative_eval(text: str) -> dict:
     meta = {"prompt_version": version, "prompt_sha256": sha}
 
     if mode() != "mock":
-        raw = _real_json(prompt_text, text)
+        raw = _real_json(prompt_text, text, deep=True)
         categories = {}
         for code in EVAL_CATEGORIES:
             cat = raw.get(code)
@@ -260,25 +282,75 @@ def narrative_eval(text: str) -> dict:
                           else "no tracked false narrative matched"),
         }
     }
-    for code in ("illegal_content", "fundamental_rights", "civic_discourse", "vulnerable_groups"):
+    for code in ("illegal_content", "hate_speech", "fundamental_rights",
+                 "civic_discourse", "vulnerable_groups"):
         hits = [k for k in _EVAL_MOCK_KEYWORDS[code] if k in t]
         categories[code] = {
             "applies": bool(hits),
             "rationale": (f"keyword signal: {', '.join(hits)}" if hits
                           else "no signal for this category"),
         }
-    harm = tracked_false or any(categories[c]["applies"] for c in
-                                ("illegal_content", "fundamental_rights",
-                                 "civic_discourse", "vulnerable_groups"))
+    # Presence vs. stance (prompt v2): harm PRESENCE no longer blocks the
+    # pro_democracy stance — only endorsing a tracked false narrative does.
+    # (Keyword mocks can't judge stance; the real model reads the doctrine.)
     pro_hits = [k for k in _EVAL_MOCK_KEYWORDS["pro_democracy"] if k in t]
     categories["pro_democracy"] = {
-        "applies": bool(pro_hits) and not harm,
+        "applies": bool(pro_hits) and not tracked_false,
         "rationale": (f"supportive civic signal: {', '.join(pro_hits)}"
-                      if pro_hits and not harm
-                      else "harm category applies" if harm and pro_hits
+                      if pro_hits and not tracked_false
+                      else "matches a tracked false narrative" if pro_hits
                       else "no pro-democracy signal"),
     }
     return meta | {"categories": categories}
+
+
+# Mock-mode topic labels per tracked narrative (real mode asks the model).
+_TOPIC_BY_NARRATIVE = {
+    "briefwahl_betrug": "elections",
+    "sozialleistungen_migranten": "migration",
+    "windkraft_duerre": "climate & energy",
+    "eu_bargeldverbot": "eu policy",
+    "impfpflicht_rueckkehr": "public health",
+    "wahlbeteiligung_staerken": "civic participation",
+}
+
+
+def summarize(text: str) -> dict:
+    """Content summary + one general topic for the ingest cards.
+
+    Runs for EVERY media-extracted item, including triaged-out ones — the
+    submitter always sees what the system read. Invalid real-model output is
+    quarantined (nulls), never guessed (repo convention)."""
+    if mode() != "mock":
+        out = _real_json(
+            "You summarize a social media post for a monitoring dashboard. The text "
+            "may carry labeled channels ([SPEECH]/[ON-SCREEN]/[SLIDE]/[CAPTION]). "
+            "First work out what the post is ABOUT — including the implicit message "
+            "its framing conveys (what it treats as good or bad without saying so). "
+            'Output JSON {"summary": str, "topic": str} — summary: 2 plain-English '
+            "sentences: what the post shows, then what its framing conveys when that "
+            "adds meaning (e.g. reporting that commemorates resistance against a "
+            "dictatorship implicitly portrays that regime as wrong). Attribute the "
+            "message to the post — never editorialize in your own voice. "
+            "topic: the ONE general theme in 1-3 lowercase English words "
+            "(e.g. 'elections', 'immigration', 'historical memory', 'public health').",
+            text, deep=True,
+        )
+        summary, topic = out.get("summary"), out.get("topic")
+        if not isinstance(summary, str) or not summary.strip() \
+                or not isinstance(topic, str) or not topic.strip():
+            return {"quarantined": True, "summary": None, "topic": None}
+        # Models sometimes return a comma list despite "ONE theme" — keep the
+        # primary one so the topic pill stays a label, not a paragraph.
+        topic = topic.split(",")[0].strip().lower()
+        return {"summary": summary.strip(), "topic": topic}
+
+    # Mock: first channel-stripped line as summary, topic via the keyword map.
+    plain = re.sub(r"\[(SPEECH|ON-SCREEN|SLIDE|CAPTION)[^\]]*\]\s*", "", text).strip()
+    first = plain.splitlines()[0].strip() if plain else text.strip()
+    summary = first if len(first) <= 160 else first[:157] + "…"
+    topic = _TOPIC_BY_NARRATIVE.get(classify(text)["narrative"], "general")
+    return {"summary": summary, "topic": topic}
 
 
 def triage(text: str) -> dict:

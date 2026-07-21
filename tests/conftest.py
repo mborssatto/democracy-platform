@@ -55,6 +55,17 @@ def _no_ambient_real_llm(request, monkeypatch):
     yield
 
 
+@pytest.fixture(autouse=True)
+def _no_ambient_apify(monkeypatch):
+    """Same rule for APIFY_TOKEN (real paid actor runs + the ToS exception —
+    the one thing the suite must never trigger by accident). Set to "" rather
+    than delenv: load_dotenv() would re-read a deleted var from .env, but it
+    never overrides an existing (even empty) one. apify_tiktok.enabled() is
+    then False; a test that wants Apify sets its own fake token on top."""
+    monkeypatch.setenv("APIFY_TOKEN", "")
+    yield
+
+
 def login_headers(client, username: str) -> dict:
     """Log a demo user in through the API (auth stub: username IS the
     credential) and return the Authorization header to send with requests."""

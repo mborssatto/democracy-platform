@@ -183,7 +183,26 @@ class OpenRouterExtractor(ex.MediaExtractor):
             json=payload,
         )
         resp.raise_for_status()
-        return resp.json()
+        data = resp.json()
+        # The pins above only prove what we ASKED for; the response names the
+        # provider that actually served the request — verify it post-hoc.
+        # An ABSENT provider field also raises: silence is not evidence of
+        # compliant routing, and raw media already left the process.
+        # The field is a coarse display name (a real Vertex-served response
+        # reports "Google", observed 2026-07-21), so check CONSISTENCY with the
+        # allowlist slugs, not equality: "google" is consistent with
+        # "google-vertex"; "deepinfra" (or silence) is not.
+        served = str(data.get("provider") or "").strip().lower().replace(" ", "-")
+        consistent = served and any(
+            a == served or a.startswith(served + "-") or served.startswith(a)
+            for a in RAW_MEDIA_ALLOWED_PROVIDERS
+        )
+        if not consistent:
+            raise RoutingPinError(
+                f"response reports serving provider {data.get('provider')!r}, "
+                f"inconsistent with the raw-media allowlist {list(RAW_MEDIA_ALLOWED_PROVIDERS)}"
+            )
+        return data
 
 
 def _parse_reply(reply: dict):

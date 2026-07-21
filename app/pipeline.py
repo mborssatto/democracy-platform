@@ -38,8 +38,14 @@ def enrich_item(con, item, claims, item_vector=None, claim_vectors=None,
     Embedding vectors may be precomputed by run_pipeline (one batch call for
     many items); when absent — the single-item worker path — they are fetched
     here after triage, so dropped items never cost an embedding call."""
-    log = {"triage_kept": 0, "triage_dropped": 0, "classified": 0,
+    log = {"summarized": 0, "triage_kept": 0, "triage_dropped": 0, "classified": 0,
            "narrative_evaluated": 0, "claim_matched": 0, "opportunities": 0}
+
+    # ---- Stage 0: summarize + topic -----------------------------------------
+    # BEFORE the triage gate on purpose: the ingest cards show every analyzed
+    # post, including triaged-out ones, and each needs its summary + topic.
+    _store(con, item["id"], "summarize", llm.summarize(item["text"]))
+    log["summarized"] += 1
 
     # ---- Stage 1: triage (+ translation) ------------------------------------
     verdict = llm.triage(item["text"])
@@ -118,15 +124,32 @@ def enrich_item(con, item, claims, item_vector=None, claim_vectors=None,
     return log
 
 
+def backfill_summaries(con) -> int:
+    """Media items enriched before the summarize stage existed get their
+    summary/topic on the next run (idempotent — only missing ones). Shared by
+    run_pipeline and the /api/pipeline/run queue drain. Caller commits."""
+    missing = con.execute(
+        "SELECT ci.* FROM content_items ci "
+        "JOIN media_extractions me ON me.item_id = ci.id "
+        "WHERE ci.status != 'pending' AND NOT EXISTS "
+        "(SELECT 1 FROM enrichments e WHERE e.item_id = ci.id AND e.stage = 'summarize')"
+    ).fetchall()
+    for item in missing:
+        _store(con, item["id"], "summarize", llm.summarize(item["text"]))
+    return len(missing)
+
+
 def run_pipeline(con) -> dict:
     """Process every pending item through all stages, synchronously.
     Returns a stage-by-stage log."""
-    log = {"triage_kept": 0, "triage_dropped": 0, "classified": 0,
+    log = {"summarized": 0, "triage_kept": 0, "triage_dropped": 0, "classified": 0,
            "narrative_evaluated": 0, "claim_matched": 0, "opportunities": 0,
            "mode": llm.mode()}
 
     items = con.execute("SELECT * FROM content_items WHERE status='pending'").fetchall()
     claims = con.execute("SELECT * FROM claims").fetchall()
+
+    log["summarized"] += backfill_summaries(con)
 
     # Real embeddings when a key is configured (None in mock mode → word-overlap
     # fallback below). Claim vectors are cached; item texts are embedded in ONE

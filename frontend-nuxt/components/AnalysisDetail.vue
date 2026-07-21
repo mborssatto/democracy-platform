@@ -9,6 +9,7 @@ defineProps<{ extraction: MediaExtraction | null; evaluation: NarrativeEval | nu
 const CAT_SHORT: Record<EvalCategory, string> = {
   false_information: 'false info',
   illegal_content: 'illegal',
+  hate_speech: 'hate speech',
   fundamental_rights: 'fund. rights',
   civic_discourse: 'civic discourse',
   vulnerable_groups: 'vulnerable groups',

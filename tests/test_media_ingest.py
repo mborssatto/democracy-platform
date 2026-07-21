@@ -101,7 +101,11 @@ def test_ingest_urls_without_apify_is_clean_503(client, monkeypatch):
 # ------------------------------------------------------------------ job process
 def _run_acquire_job(monkeypatch):
     monkeypatch.setenv("MEDIA_EXTRACTOR", "mock")
-    monkeypatch.setattr(apify_tiktok, "acquire", lambda urls, dest, client=None: [_fixture_pair()])
+    # Patch the REGISTRY entry, not apify_tiktok.acquire: process_url resolves
+    # adapters through ADAPTERS, which captured the function at import time —
+    # patching the module attribute would leave the real (network) path live.
+    monkeypatch.setitem(media_ingest.ADAPTERS["tiktok"], "acquire",
+                        lambda urls, dest, client=None: [_fixture_pair()])
     con = db.connect()
     try:
         pipeline.seed_reference_data(con)
@@ -158,7 +162,7 @@ def test_acquire_url_failure_lands_in_backoff(fresh_db, monkeypatch):
     def boom(urls, dest, client=None):
         raise apify_tiktok.AcquisitionError("actor died")
 
-    monkeypatch.setattr(apify_tiktok, "acquire", boom)
+    monkeypatch.setitem(media_ingest.ADAPTERS["tiktok"], "acquire", boom)
     con = db.connect()
     try:
         queue.enqueue(con, "acquire_url", {"url": VIDEO_URL})
@@ -193,6 +197,55 @@ def test_analyzed_posts_endpoint_shows_extraction_regardless_of_narrative(
     assert post["extraction"]["has_speech"] is True
     assert post["triage"] is not None  # verdict shown even if triaged out
     assert "narrative_eval" in post
+    assert "score" in post  # priority score + breakdown power the ingest cards
+    assert post["summarize"]["summary"] and post["summarize"]["topic"]  # card header
+
+
+# ----------------------------------------------------------------- canary/scrub
+def test_media_path_scrubs_burned_in_author_handle(fresh_db, monkeypatch):
+    """Pseudonymization canary for the media path (hard rule 5): platforms
+    watermark the author's @handle into the video itself, so OCR/ASR would
+    otherwise write the raw handle into the pseudonymized tables and every
+    downstream LLM call. The scrub in process_url must catch every channel."""
+    handle = "canary_dw_journalist"
+    ingest_item, media_post = _fixture_pair()
+    ingest_item = dict(ingest_item, real_author_id=handle,
+                       text=f"Folgt @{handle} für mehr #briefwahl")
+
+    class WatermarkedExtractor(extract.MediaExtractor):
+        def extract(self, post):
+            return extract.build_result(
+                "mock",
+                [extract.SpeechSegment(f"Hier ist {handle} mit den Fakten", 0.0, 3.0)],
+                [extract.OnScreenText(f"@{handle}", extract.VideoTextSource("video", 0.0, 9.9))],
+                ingest_item["text"], True)
+
+    monkeypatch.setattr(extract, "get_extractor", lambda: WatermarkedExtractor())
+    monkeypatch.setitem(media_ingest.ADAPTERS["tiktok"], "acquire",
+                        lambda urls, dest, client=None: [(ingest_item, media_post)])
+    con = db.connect()
+    try:
+        pipeline.seed_reference_data(con)
+        queue.enqueue(con, "acquire_url", {"url": VIDEO_URL})
+        con.commit()
+        worker.process_job(con, queue.claim_next(con))
+
+        item = con.execute("SELECT * FROM content_items").fetchone()
+        assert handle not in json.dumps(dict(item), ensure_ascii=False)
+        stored = media_ingest.load_extraction(con, item["id"])
+        assert handle not in json.dumps(stored, ensure_ascii=False)
+        # scrubbed to a placeholder, not silently deleted — analysts still see
+        # THAT an author reference was there
+        assert "[author]" in stored["merged_text"]
+    finally:
+        con.close()
+
+
+def test_scrub_author_leaves_other_handles_alone():
+    scrubbed = media_ingest.scrub_author(
+        "Antwort von @dwnews an @some_other_user: stimmt nicht", "dwnews")
+    assert "@dwnews" not in scrubbed
+    assert "@some_other_user" in scrubbed
 
 
 # ---------------------------------------------------------------- url validation
@@ -209,3 +262,5 @@ def test_analyzed_posts_endpoint_shows_extraction_regardless_of_narrative(
 )
 def test_tiktok_url_validation(url, ok):
     assert media_ingest.is_tiktok_post_url(url) is ok
+    # registry dispatch mirrors the validator (ADR 0001)
+    assert media_ingest.platform_for(url) == ("tiktok" if ok else None)
