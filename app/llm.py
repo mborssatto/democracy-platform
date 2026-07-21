@@ -30,7 +30,7 @@ OPENROUTER_KEY = os.environ.get("OPENROUTER_API_KEY")
 OPENROUTER_REASONING_MODEL = "anthropic/claude-haiku-4.5"
 
 # Deep-analysis model for the INTERPRETIVE stages (narrative evaluation,
-# summarize): reading a post's implicit framing — what it portrays as good or
+# summarize, draft_reply): reading a post's implicit framing — what it portrays as good or
 # bad without saying so — needs a stronger model. Chosen empirically
 # 2026-07-21: a 3-prompt × 2-model matrix on real content, judged on substance
 # (implicit anti-Nazi framing named), neutrality and clarity — Sonnet passed
@@ -174,7 +174,8 @@ def embed_texts(texts: list[str], transport: httpx.BaseTransport | None = None
 # Bump this whenever a prompt (or the mock heuristic standing in for it) changes.
 # The eval runner (evals/run_evals.py) stamps every score report with it, so we
 # always know which prompt version produced which numbers.
-PROMPT_VERSION = "v1"
+PROMPT_VERSION = "v2"  # v2 2026-07-22: draft_reply becomes a pro-democracy
+# commenter persona (deep model) — see draft_reply's system prompt.
 
 NARRATIVE_KEYWORDS = {
     "briefwahl_betrug": ["briefwahl", "wahlbetrug", "gefälscht", "stimmzettel", "wahlfälschung"],
@@ -401,19 +402,31 @@ def classify(text: str, codes: list | None = None) -> dict:
 
 
 def draft_reply(post_text: str, factcheck: dict | None, strategy: str = "empathy") -> str:
-    """Democracy Bot seed draft. Grounded ONLY on the matched fact-check."""
+    """Seed draft in the voice of a pro-democracy commenter replying under the
+    post. Grounded ONLY on the matched fact-check; runs on the deep model —
+    persuasive, values-first writing is interpretive work, not mechanical."""
     if mode() != "mock":
         fc = (
             f"Fact-check by {factcheck['fact_checker']}: verdict '{factcheck['verdict']}' — {factcheck['url']}"
             if factcheck else "No fact-check matched; stay general, cite nothing."
         )
         return _call_real(
-            "You draft a short English reply (max 70 words) to a German social media post spreading "
-            f"disinformation. Strategy: {strategy} — address the person respectfully, name shared "
-            "values, correct gently. Base facts ONLY on the provided fact-check. Never invent facts. "
-            "Never mention political parties or voting. This is a STARTING POINT a human will rewrite "
-            "(and translate to German before posting).",
+            "You write as an ordinary pro-democracy person leaving a public comment "
+            "under a German social media post that spreads disinformation. Voice "
+            "democratic values in your own words — fair elections, free press, human "
+            "dignity, respectful debate — the way a real person would in a comment "
+            "section: first person, warm, plain language, no hashtags or signature, "
+            f"max 70 words. Strategy: {strategy} — speak to the author respectfully, "
+            "acknowledge the worry behind the post, then push back with your own "
+            "pro-democratic view. Base every factual claim ONLY on the provided "
+            "fact-check and include its link; if none is provided, speak to values "
+            "and ask one genuine question instead — never invent facts or verdicts. "
+            "Strictly nonpartisan: never mention parties, candidates, or voting "
+            "(German charity law). Write in English — this is a STARTING POINT a "
+            "human will rewrite and translate to German before posting from their "
+            "own account.",
             f"Post: {post_text}\n\n{fc}",
+            deep=True,
         )
     fc_line = (
         f"The fact-check by {factcheck['fact_checker']} comes to a different conclusion: {factcheck['url']}"

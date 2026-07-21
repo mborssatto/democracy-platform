@@ -1,13 +1,12 @@
 <script setup lang="ts">
-// ⚙️ Data: ingest buttons, fact-check sync, pipeline run + queue depth +
-// dead-letter retry, and the tipline form.
-import type { AnalyzedPost, FactcheckSync, IngestResult, PipelineLog, QueueStatus, UrlIngestResult } from '~/types/api'
+// ⚙️ Data: URL ingestion, pipeline run + queue depth + dead-letter retry,
+// and the tipline form.
+import type { AnalyzedPost, PipelineLog, QueueStatus, UrlIngestResult } from '~/types/api'
 
 const { api } = useApi()
 const { guard, refreshState } = useAppState()
 const rq = useResponseQueue()
 
-const ingestMsg = ref('')
 const urlsInput = ref('')
 const urlResults = ref<UrlIngestResult | null>(null)
 const analyzed = ref<AnalyzedPost[]>([])
@@ -53,15 +52,6 @@ async function retryJob(id: number) {
   })
 }
 
-async function ingest(src: string) {
-  await guard(async () => {
-    const r = await api<IngestResult>('/ingest/' + src, { method: 'POST' })
-    ingestMsg.value = `+${r.new_items} new items from ${src} (${r.enqueued} queued for enrichment)`
-    refreshState()
-    loadQueue()
-  })
-}
-
 async function submitUrls() {
   const urls = urlsInput.value.split(/[\n,]/).map(u => u.trim()).filter(Boolean)
   if (!urls.length) return
@@ -100,16 +90,6 @@ function onCsvUpload(e: Event) {
   ;(e.target as HTMLInputElement).value = '' // same file can be re-selected
 }
 
-async function syncFactchecks() {
-  await guard(async () => {
-    const r = await api<FactcheckSync>('/sync/factchecks', { method: 'POST' })
-    ingestMsg.value =
-      r.mode === 'real'
-        ? `Fact-check sync: ${r.upserted} fact-checks upserted from ${r.queried_keywords} keyword queries`
-        : r.note || 'Mock mode — no FACTCHECK_API_KEY set'
-  })
-}
-
 async function runPipeline() {
   await guard(async () => {
     pipeLog.value = await api<PipelineLog>('/pipeline/run', { method: 'POST' })
@@ -122,21 +102,8 @@ async function runPipeline() {
 
 <template>
   <div>
-    <div class="banner">
-      Mock mode: platform integrations are simulated with realistic fixture data.
-      Each "Ingest" button stands in for a real API — see <b>docs/integrations/</b> for the step-by-step
-      guide to make each one real.
-    </div>
     <div class="card">
       <h2>1 · Ingest data</h2>
-      <p class="hint">Pull posts from each source. Authors are pseudonymized the moment data enters the system.</p>
-      <div class="row">
-        <button class="btn btn-blue" @click="ingest('tiktok')">Ingest TikTok (mock)</button>
-        <button class="btn btn-blue" @click="ingest('junkipedia')">Ingest Junkipedia (mock)</button>
-        <button class="btn btn-blue" @click="ingest('tipline')">Ingest tipline queue</button>
-        <button class="btn btn-blue" @click="syncFactchecks">Sync fact-checks (Google API)</button>
-        <span v-if="ingestMsg" class="meta">{{ ingestMsg }}</span>
-      </div>
 
       <div class="item" style="margin-top:12px">
         <h3 style="margin-top:0">Add posts by URL (single or bulk)</h3>
