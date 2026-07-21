@@ -129,25 +129,32 @@ async function markPosted() {
       <!-- left rail: the queue -->
       <div>
         <p class="meta" style="margin:0 0 8px"><b>Queue ({{ rq.entries.value.length }})</b></p>
-        <ContentCard
-          v-for="e in rq.entries.value" :key="e.id"
-          :post="e" density="queue"
-          :selected="e.id === selectedId"
-          :draft-status="e.draft?.status || null"
-          @select="selectCard(e)"
-          @unqueue="removeFromQueue(e)"
-        />
-        <template v-if="!rq.entries.value.length">
-          <div class="q-ghost" />
-          <div class="q-ghost" />
-          <div class="q-ghost" />
+        <LoadingSpinner v-if="rq.loading.value" />
+        <template v-else>
+          <ContentCard
+            v-for="e in rq.entries.value" :key="e.id"
+            :post="e" density="queue"
+            :selected="e.id === selectedId"
+            :draft-status="e.draft?.status || null"
+            @select="selectCard(e)"
+            @unqueue="removeFromQueue(e)"
+          />
+          <template v-if="!rq.entries.value.length">
+            <div class="q-ghost" />
+            <div class="q-ghost" />
+            <div class="q-ghost" />
+          </template>
+          <div class="q-empty">Add posts from ⚙️ Data or 📡 Radar</div>
         </template>
-        <div class="q-empty">Add posts from ⚙️ Data or 📡 Radar</div>
       </div>
 
       <!-- right pane: empty state → card CTA → draft editor -->
       <div>
-        <div v-if="!selected" class="q-empty" style="min-height:220px;display:flex;align-items:center;justify-content:center">
+        <div v-if="rq.loading.value" class="q-empty" style="min-height:220px;display:flex;align-items:center;justify-content:center">
+          <LoadingSpinner />
+        </div>
+
+        <div v-else-if="!selected" class="q-empty" style="min-height:220px;display:flex;align-items:center;justify-content:center">
           <span style="max-width:320px">
             {{ rq.entries.value.length
               ? 'Select a post from the queue to start or continue its draft.'

@@ -14,6 +14,7 @@ const rq = useResponseQueue()
 const radar = ref<Narrative[]>([])
 const analyzed = ref<AnalyzedPost[]>([])
 const open = ref<Record<string, boolean>>({})
+const loading = ref(true)
 
 // The evaluation categories a post's auditable verdict flags as applying.
 function appliesCats(p: AnalyzedPost): EvalCategory[] {
@@ -59,6 +60,7 @@ async function load() {
     radar.value = await api<Narrative[]>('/radar')
     analyzed.value = await api<AnalyzedPost[]>('/analyzed')
   })
+  loading.value = false
   rq.load()
 }
 onMounted(load)
@@ -74,7 +76,8 @@ onMounted(load)
       New narratives are added from the 🎨 Studio tab.
     </p>
 
-    <div v-if="!radar.length" class="empty">No data yet — go to ⚙️ Data, ingest sources and run the pipeline.</div>
+    <LoadingSpinner v-if="loading" />
+    <div v-else-if="!radar.length" class="empty">No data yet — go to ⚙️ Data, ingest sources and run the pipeline.</div>
 
     <section v-for="s in bySection" :key="s.key" :style="s.key === 'pro_democracy' ? 'border-top:2px solid var(--line);margin-top:18px;padding-top:12px' : ''">
       <h3 style="margin:14px 0 2px">{{ s.icon }} {{ s.title }}</h3>

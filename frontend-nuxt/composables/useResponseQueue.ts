@@ -8,6 +8,7 @@ export function useResponseQueue() {
   const { api } = useApi()
   const { guard } = useAppState()
   const entries = useState<QueueEntry[]>('response-queue', () => [])
+  const loading = useState<boolean>('response-queue-loading', () => true)
 
   const queuedIds = computed(() => new Set(entries.value.map(e => e.id)))
 
@@ -16,6 +17,8 @@ export function useResponseQueue() {
       entries.value = await api<QueueEntry[]>('/response-queue')
     } catch {
       /* silent — queue badge is non-critical; guard() paths surface errors */
+    } finally {
+      loading.value = false
     }
   }
 
@@ -38,5 +41,5 @@ export function useResponseQueue() {
     })
   }
 
-  return { entries, queuedIds, load, add, remove }
+  return { entries, queuedIds, loading, load, add, remove }
 }

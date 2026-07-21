@@ -11,6 +11,7 @@ const radar = ref<Narrative[]>([])
 const brief = ref<Brief | null>(null)
 const showAdd = ref(false)
 const addMsg = ref('')
+const loading = ref(true)
 const draft = ref({
   code: '', label_de: '', label_en: '', description_en: '',
   category: 'false_information' as EvalCategory,
@@ -20,6 +21,7 @@ async function load() {
   await guard(async () => {
     radar.value = await api<Narrative[]>('/radar')
   })
+  loading.value = false
 }
 onMounted(load)
 
@@ -86,7 +88,8 @@ async function addNarrative() {
         <button v-for="n in radar" :key="n.code" class="btn btn-ghost" @click="makeBrief(n.code)">
           {{ lang === 'de' ? n.label_de : n.label_en }}</button>
       </div>
-      <div v-if="!radar.length" class="empty">Run the pipeline first to see active narratives.</div>
+      <LoadingSpinner v-if="loading" />
+      <div v-else-if="!radar.length" class="empty">Run the pipeline first to see active narratives.</div>
     </div>
     <div v-if="brief" class="card">
       <h3 style="margin-bottom:8px">Brief: {{ lang === 'de' ? brief.narrative.label_de : brief.narrative.label_en }}</h3>
@@ -102,7 +105,7 @@ async function addNarrative() {
           <h3>🚫 Avoid</h3>
           <ul><li v-for="a in brief.brief.avoid" :key="a">{{ a }}</li></ul>
           <h3 style="margin-top:10px">📎 Sources</h3>
-          <ul><li v-for="c in brief.factchecks" :key="c.id"><a :href="c.url || '#'" target="_blank">{{ c.fact_checker }} — {{ c.verdict }}</a></li></ul>
+          <ul><li v-for="c in brief.factchecks" :key="c.id"><a :href="c.url || '#'" target="_blank" rel="noopener noreferrer">{{ c.fact_checker }} — {{ c.verdict }}</a></li></ul>
         </div>
       </div>
     </div>

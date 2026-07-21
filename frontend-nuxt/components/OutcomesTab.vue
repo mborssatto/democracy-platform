@@ -8,6 +8,7 @@ const { guard, fmt } = useAppState()
 
 const outcomes = ref<PostedOutcome[]>([])
 const ffMsg = ref('')
+const loading = ref(true)
 
 onMounted(loadOutcomes)
 
@@ -15,6 +16,7 @@ async function loadOutcomes() {
   await guard(async () => {
     outcomes.value = (await api<OutcomesResponse>('/outcomes')).posted
   })
+  loading.value = false
 }
 
 async function fastForward() {
@@ -42,12 +44,13 @@ async function fastForward() {
         Production simply waits — this button exists so a demo doesn't take three days.</span>
     </div>
     <span v-if="ffMsg" class="meta">{{ ffMsg }}</span>
-    <div v-if="!outcomes.length" class="empty">No posted replies yet — complete the 💬 Respond flow
+    <LoadingSpinner v-if="loading" />
+    <div v-else-if="!outcomes.length" class="empty">No posted replies yet — complete the 💬 Respond flow
       (claim → rework → mark as posted) first.</div>
     <div v-for="p in outcomes" :key="p.id" class="item">
       <div class="row">
         <span class="pill pill-plat">reply #{{ p.id }}</span>
-        <a :href="p.posted_url" target="_blank" class="meta">{{ p.posted_url }} ↗</a>
+        <a :href="p.posted_url" target="_blank" rel="noopener noreferrer" class="meta">{{ p.posted_url }} ↗</a>
         <span class="meta">posted {{ p.posted_at }}</span>
       </div>
       <div v-if="!p.delta.offsets.length" class="meta" style="margin-top:6px">

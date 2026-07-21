@@ -19,6 +19,7 @@ const emit = defineEmits<{ queue: [post: AnalyzedPost]; unqueue: [post: Analyzed
 
 const open = ref(false)
 const expanded = ref(false)  // summary "read more" state
+const qOpen = ref(false)  // queue card: expand to reveal full details incl. post link
 
 const CAT_LABEL: Record<EvalCategory, string> = {
   false_information: 'False information',
@@ -126,7 +127,10 @@ const clampable = computed(() => (summary.value?.length || 0) > 150)
   >
     <div class="row" style="justify-content:space-between;gap:6px;flex-wrap:nowrap">
       <span class="qlink">{{ title }}</span>
-      <button class="qx" title="Remove from queue" @click.stop="emit('unqueue', post)">✕</button>
+      <div class="row" style="gap:2px;flex-wrap:nowrap;flex-shrink:0">
+        <button class="chev" title="Expand details" @click.stop="qOpen = !qOpen">{{ qOpen ? '▾' : '▸' }}</button>
+        <button class="qx" title="Remove from queue" @click.stop="emit('unqueue', post)">✕</button>
+      </div>
     </div>
     <p class="qsum">{{ summary || post.extraction?.caption || post.text }}</p>
     <p class="qmeta">
@@ -134,6 +138,49 @@ const clampable = computed(() => (summary.value?.length || 0) > 150)
       <template v-if="post.summarize?.topic"> · {{ post.summarize.topic }}</template>
       <template v-if="draftStatus"> · <em>{{ draftStatus === 'post_ready' ? 'post-ready' : draftStatus === 'posted' ? 'posted' : 'drafting' }}</em></template>
     </p>
+
+    <div v-if="qOpen" class="q-expanded" @click.stop>
+      <a v-if="post.url" :href="post.url" target="_blank" rel="noopener noreferrer" class="see-post">see post ↗</a>
+      <p class="qmeta" style="margin-top:4px">
+        {{ post.platform }} · {{ post.author_pseudo }}
+        <template v-if="posted"> · posted {{ posted }}</template>
+        <template v-if="analyzed"> · analyzed {{ analyzed }}</template>
+      </p>
+      <div class="row" style="gap:6px;flex-wrap:wrap;margin-top:6px;align-items:center">
+        <span
+          v-for="c in categories" :key="c.cat"
+          class="pill" :class="c.cat === 'pro_democracy' ? 'pill-ok' : 'pill-warn'"
+          :title="c.rationale"
+        >{{ CAT_LABEL[c.cat] }}</span>
+        <span v-if="post.narrative_eval?.quarantined" class="pill pill-warn">⚠ evaluation quarantined</span>
+        <span v-if="growthPct !== null" class="pill pill-growth">▲ {{ growthPct }}% views/24h</span>
+        <span class="qmeta">👥 {{ post.author_followers_band || '?' }} followers</span>
+        <span class="qmeta">👁 {{ post.views.toLocaleString() }} views</span>
+      </div>
+      <div v-if="scoreParts.length" class="score-strip" style="margin-top:8px">
+        <span class="score-num" :class="'score-' + scoreBand">
+          {{ post.score!.score }}
+          <em>{{ scoreBand }} priority</em>
+        </span>
+        <span v-for="p in scoreParts" :key="p.label" class="score-comp" :title="p.tip">
+          <span class="meta">{{ p.label }}</span>
+          <span class="score-bar"><i :style="{ width: Math.round(100 * p.pts / p.max) + '%' }" /></span>
+          <span class="meta">{{ p.pts }}/{{ p.max }}</span>
+        </span>
+      </div>
+      <div v-if="post.extraction" style="margin-top:8px">
+        <button class="chev" @click.stop="open = !open">{{ open ? '▾' : '▸' }} Transcript</button>
+        <div v-if="open" style="margin-top:6px">
+          <div v-for="(r, i) in transcript" :key="i" class="tr-row">
+            <span class="tr-label meta">{{ r.label }}</span>
+            <span class="tr-text">{{ r.text }}</span>
+          </div>
+          <p v-if="!post.extraction.has_speech" class="meta" style="margin-top:4px">
+            🎙 No speech detected (music/mute — nothing transcribed by design).
+          </p>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- full + compact densities -->
@@ -141,7 +188,7 @@ const clampable = computed(() => (summary.value?.length || 0) > 150)
     <div class="row" style="justify-content:space-between;align-items:flex-start;flex-wrap:nowrap;gap:12px">
       <div style="min-width:0">
         <span style="font-size:13.5px;font-weight:600">{{ title }}</span>
-        <a v-if="post.url" :href="post.url" target="_blank" rel="noopener" class="see-post">see post ↗</a>
+        <a v-if="post.url" :href="post.url" target="_blank" rel="noopener noreferrer" class="see-post">see post ↗</a>
         <div class="meta" style="margin-top:2px">
           {{ post.platform }} · {{ post.author_pseudo }}
           <template v-if="posted"> · posted {{ posted }}</template>

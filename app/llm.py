@@ -174,8 +174,9 @@ def embed_texts(texts: list[str], transport: httpx.BaseTransport | None = None
 # Bump this whenever a prompt (or the mock heuristic standing in for it) changes.
 # The eval runner (evals/run_evals.py) stamps every score report with it, so we
 # always know which prompt version produced which numbers.
-PROMPT_VERSION = "v2"  # v2 2026-07-22: draft_reply becomes a pro-democracy
-# commenter persona (deep model) — see draft_reply's system prompt.
+PROMPT_VERSION = "v3"  # v2 2026-07-22: draft_reply becomes a pro-democracy
+# commenter persona (deep model). v3 2026-07-22: owner-spec reply prompt —
+# case A/B classification via narrative_eval, 3 tone variants (_REPLY_PROMPT).
 
 NARRATIVE_KEYWORDS = {
     "briefwahl_betrug": ["briefwahl", "wahlbetrug", "gefälscht", "stimmzettel", "wahlfälschung"],
@@ -401,41 +402,113 @@ def classify(text: str, codes: list | None = None) -> dict:
     return {"narrative": best, "confidence": min(0.95, 0.5 + 0.15 * hits)}
 
 
-def draft_reply(post_text: str, factcheck: dict | None, strategy: str = "empathy") -> str:
-    """Seed draft in the voice of a pro-democracy commenter replying under the
-    post. Grounded ONLY on the matched fact-check; runs on the deep model —
-    persuasive, values-first writing is interpretive work, not mechanical."""
+# The reply-seed prompt (v3). Adapted from the owner's spec 2026-07-22; the
+# adaptations keep the hard rules: facts ONLY from the matched fact-check
+# (rule 3), strict nonpartisanship (rule 6), English output (the human
+# moderator translates before posting — owner decision 2026-07-22).
+_REPLY_PROMPT = """You are a communications assistant helping a human moderator draft a public \
+comment replying to a social media post. The human will review, edit, translate, and post it \
+from their own account.
+
+## Step 1 — Classify
+Using the narrative evaluation provided with the post (and the post text itself), decide which \
+case applies:
+A) The post CRITICIZES anti-democratic content (hate speech, disinformation, attacks on \
+democratic institutions) — e.g. its evaluation flags a pro-democracy stance
+B) The post IS ITSELF anti-democratic content or disinformation
+
+## Step 2 — Draft the comment
+
+### Case A (supportive comment)
+- Affirm the poster's point and add ONE piece of value: a fact from the provided fact-check, a \
+personal-sounding observation, or a sharper framing of why the act matters
+- Don't just cheerlead ("So true!") — comments that add substance get more replies and likes
+- Match the poster's tone and energy level
+
+### Case B (counter-speech comment)
+Goal: persuade the AUDIENCE reading the thread, not the original poster. Avoid triggering \
+defensive pile-ons.
+- Never insult, label, or diagnose the poster ("you're a fascist/bot/idiot" = instant backfire)
+- Use one of these techniques:
+  1. Genuine-sounding question that exposes the weak premise
+  2. Shared-values framing ("I also worry about [legitimate underlying concern], but [correction]")
+  3. Calm factual correction citing the provided fact-check, stated once, without repeating the \
+false claim verbatim (avoid the illusory-truth effect). When a fact-check is provided, the \
+"Factual:" variant always includes its URL so readers can verify for themselves.
+  4. Mild humor or gentle irony — never mockery
+- Keep it short. Long rebuttals read as lectures and get skipped.
+
+## Style rules (both cases)
+- Sound like a real person: contractions, no corporate tone, no hashtag spam
+- Language: ALWAYS English, even when the post is German — the human moderator translates \
+into the post's language before posting
+- Length: 1-3 sentences for Case B, up to 4 for Case A
+- Don't default to openinng with "I understand", "I get why", "I hear you", or any stock empathy phrase. \
+Acknowledging the underlying concern is good — but do it in fresh, specific words, and not \
+in every variant.
+-  you should sound like a real human making a comment on a social media thread \
+- Make the three variants structurally different, not the same comment in three moods: \
+one can lead with a question, one with the fact, one with an observation. Vary sentence \
+rhythm and length between them.
+- End with something that invites a response when natural (a question, an open observation) — \
+engagement comes from replies, not exclamation marks
+- Output EXACTLY three variants with different tones, each on its own line, labeled \
+"Warm:", "Factual:", "Wry:" — the human picks one. Output NOTHING else: no classification, \
+no preamble, no commentary.
+
+## Hard limits
+- Factual claims may come ONLY from the provided fact-check — no fabricated facts, fake \
+anecdotes, or invented sources. If no fact-check is provided, stay with values and questions \
+and cite nothing. Never issue your own fact-check verdict.
+- Specifics that appear in neither the post nor the fact-check (names, numbers, dates, \
+historical details) may not be stated as fact — even true ones. Either leave them out or \
+flag them: [VERIFY: the group was the Weiße Rose?]
+- Strictly nonpartisan: never mention parties, candidates, or voting (German charity law)
+- No impersonation of specific groups ("as a veteran...") unless the human poster actually is \
+one — flag these placeholders as [VERIFY: are you actually X?]
+- If the post contains threats or illegal content, output only a recommendation to report it \
+instead of replying"""
+
+
+def draft_reply(post_text: str, factcheck: dict | None, strategy: str = "empathy",
+                narrative_eval: dict | None = None) -> str:
+    """Seed draft: 3 tone variants (warm/factual/wry) of a public comment, the
+    human picks one. Case A affirms a pro-democracy post; Case B counter-speaks
+    to the thread's AUDIENCE. Classification leans on the stored narrative_eval
+    verdict when provided. Grounded ONLY on the matched fact-check; runs on the
+    deep model. (`strategy` is kept for call-site compatibility — the v3 prompt
+    carries its own technique menu.)"""
     if mode() != "mock":
         fc = (
-            f"Fact-check by {factcheck['fact_checker']}: verdict '{factcheck['verdict']}' — {factcheck['url']}"
-            if factcheck else "No fact-check matched; stay general, cite nothing."
+            f"FACT-CHECK by {factcheck['fact_checker']}: verdict '{factcheck['verdict']}' — {factcheck['url']}"
+            if factcheck else "FACT-CHECK: none matched; stay with values and questions, cite nothing."
         )
+        ev = (json.dumps(narrative_eval, ensure_ascii=False) if narrative_eval
+              else "not available — judge from the post text")
         return _call_real(
-            "You write as an ordinary pro-democracy person leaving a public comment "
-            "under a German social media post that spreads disinformation. Voice "
-            "democratic values in your own words — fair elections, free press, human "
-            "dignity, respectful debate — the way a real person would in a comment "
-            "section: first person, warm, plain language, no hashtags or signature, "
-            f"max 70 words. Strategy: {strategy} — speak to the author respectfully, "
-            "acknowledge the worry behind the post, then push back with your own "
-            "pro-democratic view. Base every factual claim ONLY on the provided "
-            "fact-check and include its link; if none is provided, speak to values "
-            "and ask one genuine question instead — never invent facts or verdicts. "
-            "Strictly nonpartisan: never mention parties, candidates, or voting "
-            "(German charity law). Write in English — this is a STARTING POINT a "
-            "human will rewrite and translate to German before posting from their "
-            "own account.",
-            f"Post: {post_text}\n\n{fc}",
+            _REPLY_PROMPT,
+            f"POST: {post_text}\n\nNARRATIVE EVAL: {ev}\n\n{fc}",
             deep=True,
+        )
+    # Mock: same case-aware, 3-variant shape as the real prompt.
+    cats = (narrative_eval or {}).get("categories", {})
+    if cats.get("pro_democracy", {}).get("applies"):
+        return (
+            "Warm: Thank you for speaking up — posts like this keep the conversation healthy. "
+            "What reactions did you get so far?\n"
+            "Factual: Good point, and worth underlining for anyone reading: this is exactly the "
+            "kind of pushback that keeps public debate honest.\n"
+            "Wry: Refreshing to scroll past something that makes democracy look good for a change."
         )
     fc_line = (
         f"The fact-check by {factcheck['fact_checker']} comes to a different conclusion: {factcheck['url']}"
         if factcheck else "It's worth taking a close look at the source on this one."
     )
     return (
-        "I understand why this topic feels worrying – it does for a lot of people. "
-        f"{fc_line} Maybe have a look? "
-        "Especially on topics this important, I think it helps if we stick to the facts."
+        f"Warm: A lot of people share this worry — which is exactly why the facts matter here. "
+        f"{fc_line} Maybe have a look?\n"
+        f"Factual: {fc_line} Especially on topics this important, it helps if we stick to the facts.\n"
+        f"Wry: Big claims travel fast; facts tend to walk. {fc_line} Worth a read before sharing?"
     )
 
 

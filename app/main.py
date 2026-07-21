@@ -471,7 +471,7 @@ def item_draft(item_id: int, user: dict = ANY_USER):
             (item_id,)).fetchone()
         fc = {"fact_checker": row["fact_checker"], "verdict": row["verdict"], "url": row["url"]} \
             if row["fact_checker"] else None
-        seed = llm.draft_reply(row["text"], fc)
+        seed = llm.draft_reply(row["text"], fc, narrative_eval=_narrative_eval_of(con, item_id))
         cur = con.execute(
             "INSERT INTO drafts (opportunity_id, kind, strategy, ai_seed, current_text, "
             "created_by, created_at) VALUES (?,?,?,?,?,?,?)",
@@ -611,11 +611,20 @@ def _guard_responder_owns(con, user: dict, opp_id: int | None, draft_id: int | N
                          {"opportunity": opp_id, "draft": draft_id})
 
 
+def _narrative_eval_of(con, item_id: int) -> dict | None:
+    """The item's stored narrative_eval enrichment (drives the reply prompt's
+    Case A/B classification), or None when the stage hasn't run."""
+    row = con.execute(
+        "SELECT output_json FROM enrichments WHERE item_id=? AND stage='narrative_eval'",
+        (item_id,)).fetchone()
+    return json.loads(row["output_json"]) if row else None
+
+
 @app.post("/api/opportunities/{opp_id}/draft")
 def create_draft(opp_id: int, user: dict = ANY_USER):
     con = db.connect()
     row = con.execute(
-        """SELECT o.id, ci.text, cl.fact_checker, cl.verdict, cl.url, cl.claim_en
+        """SELECT o.id, o.item_id, ci.text, cl.fact_checker, cl.verdict, cl.url, cl.claim_en
            FROM opportunities o JOIN content_items ci ON ci.id=o.item_id
            LEFT JOIN claim_matches cm ON cm.item_id=ci.id
            LEFT JOIN claims cl ON cl.id=cm.claim_id WHERE o.id=?""", (opp_id,)).fetchone()
@@ -625,7 +634,7 @@ def create_draft(opp_id: int, user: dict = ANY_USER):
     _guard_responder_owns(con, user, opp_id)
     fc = {"fact_checker": row["fact_checker"], "verdict": row["verdict"], "url": row["url"]} \
         if row["fact_checker"] else None
-    seed = llm.draft_reply(row["text"], fc)
+    seed = llm.draft_reply(row["text"], fc, narrative_eval=_narrative_eval_of(con, row["item_id"]))
     cur = con.execute(
         "INSERT INTO drafts (opportunity_id, kind, strategy, ai_seed, current_text, created_at) "
         "VALUES (?,?,?,?,?,?)", (opp_id, "reply", "empathy", seed, seed, db.now()))
