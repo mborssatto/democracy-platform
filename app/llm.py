@@ -30,13 +30,18 @@ OPENROUTER_KEY = os.environ.get("OPENROUTER_API_KEY")
 OPENROUTER_REASONING_MODEL = "anthropic/claude-haiku-4.5"
 
 # Deep-analysis model for the INTERPRETIVE stages (narrative evaluation,
-# summarize, draft_reply): reading a post's implicit framing — what it portrays as good or
+# summarize): reading a post's implicit framing — what it portrays as good or
 # bad without saying so — needs a stronger model. Chosen empirically
 # 2026-07-21: a 3-prompt × 2-model matrix on real content, judged on substance
 # (implicit anti-Nazi framing named), neutrality and clarity — Sonnet passed
 # all hard rules where Haiku kept slipping on neutrality. Mechanical stages
 # (triage, classify, translate) stay on the cheap model above.
 OPENROUTER_DEEP_MODEL = "anthropic/claude-sonnet-5"
+
+# Reply-draft model: the ONLY user-visible generated prose (the seed a human
+# reworks and posts). Persuasive counter-speech quality is worth the top
+# Opus tier here; the volume is tiny (one call per claimed opportunity).
+OPENROUTER_REPLY_MODEL = "anthropic/claude-opus-4.8"
 
 
 def mode() -> str:
@@ -50,12 +55,13 @@ def mode() -> str:
 
 
 # ---------------------------------------------------------------- real backends
-def _call_real(system: str, user: str, deep: bool = False) -> str:
+def _call_real(system: str, user: str, deep: bool = False, model: str | None = None) -> str:
     """Minimal real-model call. Returns the model's text reply.
 
     `deep=True` routes to OPENROUTER_DEEP_MODEL on the OpenRouter backend
-    (interpretive stages); the direct Anthropic/OpenAI backends keep their
-    single model — deep-vs-cheap tiering exists only where we run for real."""
+    (interpretive stages); `model` overrides the OpenRouter model outright
+    (reply drafts). The direct Anthropic/OpenAI backends keep their single
+    model — model tiering exists only where we run for real."""
     if ANTHROPIC_KEY:
         r = httpx.post(
             "https://api.anthropic.com/v1/messages",
@@ -93,7 +99,7 @@ def _call_real(system: str, user: str, deep: bool = False) -> str:
         "https://openrouter.ai/api/v1/chat/completions",
         headers={"Authorization": f"Bearer {OPENROUTER_KEY}"},
         json={
-            "model": OPENROUTER_DEEP_MODEL if deep else OPENROUTER_REASONING_MODEL,
+            "model": model or (OPENROUTER_DEEP_MODEL if deep else OPENROUTER_REASONING_MODEL),
             "provider": {"data_collection": "deny"},
             "messages": [
                 {"role": "system", "content": system},
@@ -174,9 +180,11 @@ def embed_texts(texts: list[str], transport: httpx.BaseTransport | None = None
 # Bump this whenever a prompt (or the mock heuristic standing in for it) changes.
 # The eval runner (evals/run_evals.py) stamps every score report with it, so we
 # always know which prompt version produced which numbers.
-PROMPT_VERSION = "v3"  # v2 2026-07-22: draft_reply becomes a pro-democracy
+PROMPT_VERSION = "v4"  # v2 2026-07-22: draft_reply becomes a pro-democracy
 # commenter persona (deep model). v3 2026-07-22: owner-spec reply prompt —
-# case A/B classification via narrative_eval, 3 tone variants (_REPLY_PROMPT).
+# 3 tone variants (_REPLY_PROMPT). v4 2026-07-22: the A/B disinfo binary
+# becomes a SUPPORT/COUNTER/ENGAGE/REPORT strategy menu — most posts aren't
+# disinformation and get an ordinary human reply, not counter-speech.
 
 NARRATIVE_KEYWORDS = {
     "briefwahl_betrug": ["briefwahl", "wahlbetrug", "gefälscht", "stimmzettel", "wahlfälschung"],
@@ -410,22 +418,27 @@ _REPLY_PROMPT = """You are a communications assistant helping a human moderator 
 comment replying to a social media post. The human will review, edit, translate, and post it \
 from their own account.
 
-## Step 1 — Classify
-Using the narrative evaluation provided with the post (and the post text itself), decide which \
-case applies:
-A) The post CRITICIZES anti-democratic content (hate speech, disinformation, attacks on \
-democratic institutions) — e.g. its evaluation flags a pro-democracy stance
-B) The post IS ITSELF anti-democratic content or disinformation
+## Step 1 — Read the post
+Not every post is disinformation, and not every post needs countering. First work out what \
+this post actually is and does — the narrative evaluation is evidence, not a verdict. Then \
+pick the strategy the post calls for:
+- SUPPORT — the post defends democratic values or criticizes anti-democratic content \
+(hate speech, disinformation, attacks on democratic institutions)
+- COUNTER — the post itself spreads a claim the provided fact-check contradicts, or attacks \
+democratic institutions
+- ENGAGE — anything else: a genuine question, a worry, an observation, satire, a mixed take. \
+Most posts are this. Respond to what was actually said, as a human in the thread would.
+- REPORT — the post contains threats or clearly illegal content
 
 ## Step 2 — Draft the comment
 
-### Case A (supportive comment)
+### SUPPORT (supportive comment)
 - Affirm the poster's point and add ONE piece of value: a fact from the provided fact-check, a \
 personal-sounding observation, or a sharper framing of why the act matters
 - Don't just cheerlead ("So true!") — comments that add substance get more replies and likes
 - Match the poster's tone and energy level
 
-### Case B (counter-speech comment)
+### COUNTER (counter-speech comment)
 Goal: persuade the AUDIENCE reading the thread, not the original poster. Avoid triggering \
 defensive pile-ons.
 - Never insult, label, or diagnose the poster ("you're a fascist/bot/idiot" = instant backfire)
@@ -438,14 +451,27 @@ false claim verbatim (avoid the illusory-truth effect). When a fact-check is pro
   4. Mild humor or gentle irony — never mockery
 - Keep it short. Long rebuttals read as lectures and get skipped.
 
+### ENGAGE (ordinary reply)
+- Answer or react to the post's actual content — no correcting, no lecturing, no assuming bad \
+intent. If the poster asks something, help; if they share a worry, take it seriously; if they \
+joke, you can play along.
+- The provided fact-check may add context ONLY when it genuinely fits what was said — \
+otherwise leave it out entirely.
+- This is where sounding human matters most: a reply that treats a normal post as a threat \
+reads as bot behavior.
+
+### REPORT
+- Output only a short recommendation to report the post instead of replying.
+
 ## Style rules (both cases)
 - Sound like a real person: contractions, no corporate tone, no hashtag spam
 - Language: ALWAYS English, even when the post is German — the human moderator translates \
 into the post's language before posting
 - Length: 1-3 sentences for Case B, up to 4 for Case A
-- Don't default to openinng with "I understand", "I get why", "I hear you", or any stock empathy phrase. \
-Acknowledging the underlying concern is good — but do it in fresh, specific words, and not \
-in every variant.
+- NEVER open a variant with "I understand", "I get why", "I hear you", "I get that", or any \
+other stock empathy phrase — not as the first words after the label, ever. Acknowledging the \
+underlying concern is good — but do it in fresh, specific words, mid-comment, and not in \
+every variant.
 -  you should sound like a real human making a comment on a social media thread \
 - Make the three variants structurally different, not the same comment in three moods: \
 one can lead with a question, one with the fact, one with an observation. Vary sentence \
@@ -470,14 +496,31 @@ one — flag these placeholders as [VERIFY: are you actually X?]
 instead of replying"""
 
 
+# Stock empathy openers the reply prompt bans. Checked in code because the
+# model occasionally slips despite the prompt — a deterministic guard plus one
+# corrective retry beats hoping. Lowercase; compared against each variant's
+# text right after its "Warm:/Factual:/Wry:" label.
+_BANNED_OPENERS = ("i understand", "i get why", "i hear you", "i get that")
+
+
+def _variants_with_banned_opener(draft: str) -> list[str]:
+    """Names of variants (e.g. ['Warm']) that open with a banned phrase."""
+    bad = []
+    for line in draft.splitlines():
+        m = re.match(r"\s*(warm|factual|wry)\s*:\s*(.*)", line, re.IGNORECASE)
+        if m and m.group(2).strip().lower().startswith(_BANNED_OPENERS):
+            bad.append(m.group(1).capitalize())
+    return bad
+
+
 def draft_reply(post_text: str, factcheck: dict | None, strategy: str = "empathy",
                 narrative_eval: dict | None = None) -> str:
     """Seed draft: 3 tone variants (warm/factual/wry) of a public comment, the
-    human picks one. Case A affirms a pro-democracy post; Case B counter-speaks
-    to the thread's AUDIENCE. Classification leans on the stored narrative_eval
-    verdict when provided. Grounded ONLY on the matched fact-check; runs on the
-    deep model. (`strategy` is kept for call-site compatibility — the v3 prompt
-    carries its own technique menu.)"""
+    human picks one. Strategy (SUPPORT/COUNTER/ENGAGE/REPORT) is picked from
+    what the post calls for, leaning on the stored narrative_eval verdict when
+    provided. Grounded ONLY on the matched fact-check; runs on the top reply
+    model (OPENROUTER_REPLY_MODEL). (`strategy` is kept for call-site
+    compatibility — the v3 prompt carries its own technique menu.)"""
     if mode() != "mock":
         fc = (
             f"FACT-CHECK by {factcheck['fact_checker']}: verdict '{factcheck['verdict']}' — {factcheck['url']}"
@@ -485,12 +528,23 @@ def draft_reply(post_text: str, factcheck: dict | None, strategy: str = "empathy
         )
         ev = (json.dumps(narrative_eval, ensure_ascii=False) if narrative_eval
               else "not available — judge from the post text")
-        return _call_real(
-            _REPLY_PROMPT,
-            f"POST: {post_text}\n\nNARRATIVE EVAL: {ev}\n\n{fc}",
-            deep=True,
-        )
-    # Mock: same case-aware, 3-variant shape as the real prompt.
+        user_msg = f"POST: {post_text}\n\nNARRATIVE EVAL: {ev}\n\n{fc}"
+        draft = _call_real(_REPLY_PROMPT, user_msg, model=OPENROUTER_REPLY_MODEL)
+        bad = _variants_with_banned_opener(draft)
+        if bad:  # one corrective retry — deterministic guard over model luck
+            draft = _call_real(
+                _REPLY_PROMPT,
+                user_msg + "\n\nREWRITE NOTE: your previous attempt opened the "
+                f"{' and '.join(bad)} variant(s) with a banned stock empathy phrase "
+                "('I understand...' / 'I get why...'). Regenerate ALL THREE variants "
+                "with fresh, specific openings — lead with the fact, a question, or "
+                "an observation instead.",
+                model=OPENROUTER_REPLY_MODEL,
+            )
+        return draft
+    # Mock: same strategy-aware, 3-variant shape as the real prompt.
+    # SUPPORT / COUNTER / ENGAGE picked from the stored evaluation — countering
+    # only when the eval flags a false narrative or a fact-check contradicts.
     cats = (narrative_eval or {}).get("categories", {})
     if cats.get("pro_democracy", {}).get("applies"):
         return (
@@ -500,15 +554,23 @@ def draft_reply(post_text: str, factcheck: dict | None, strategy: str = "empathy
             "kind of pushback that keeps public debate honest.\n"
             "Wry: Refreshing to scroll past something that makes democracy look good for a change."
         )
-    fc_line = (
-        f"The fact-check by {factcheck['fact_checker']} comes to a different conclusion: {factcheck['url']}"
-        if factcheck else "It's worth taking a close look at the source on this one."
-    )
-    return (
-        f"Warm: A lot of people share this worry — which is exactly why the facts matter here. "
-        f"{fc_line} Maybe have a look?\n"
-        f"Factual: {fc_line} Especially on topics this important, it helps if we stick to the facts.\n"
-        f"Wry: Big claims travel fast; facts tend to walk. {fc_line} Worth a read before sharing?"
+    if factcheck or cats.get("false_information", {}).get("applies"):
+        fc_line = (
+            f"The fact-check by {factcheck['fact_checker']} comes to a different conclusion: {factcheck['url']}"
+            if factcheck else "It's worth taking a close look at the source on this one."
+        )
+        return (
+            f"Warm: A lot of people share this worry — which is exactly why the facts matter here. "
+            f"{fc_line} Maybe have a look?\n"
+            f"Factual: {fc_line} Especially on topics this important, it helps if we stick to the facts.\n"
+            f"Wry: Big claims travel fast; facts tend to walk. {fc_line} Worth a read before sharing?"
+        )
+    return (  # ENGAGE: an ordinary post gets an ordinary human reply
+        "Warm: Good question — I'd like to know this too. Has anyone here dealt with it?\n"
+        "Factual: There's probably an official source that answers this — worth checking "
+        "before relying on thread replies.\n"
+        "Wry: Asking real questions on the internet — bold move, hope the comment section "
+        "behaves for once."
     )
 
 

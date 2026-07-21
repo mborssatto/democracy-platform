@@ -67,3 +67,21 @@ def test_openrouter_call_shape(monkeypatch):
     # deep=True routes interpretive stages to the deep-analysis model
     llm._call_real("system prompt", "user prompt", deep=True)
     assert captured["body"]["model"] == llm.OPENROUTER_DEEP_MODEL
+
+
+def test_reply_banned_opener_guard():
+    """The code-level guard catches variants opening with stock empathy
+    phrases (the prompt bans them, but models occasionally slip)."""
+    from app.llm import _variants_with_banned_opener
+
+    bad = _variants_with_banned_opener(
+        "Warm: I understand why this worries you.\n"
+        "Factual: The fact-check says otherwise: https://x\n"
+        "Wry: I get that it spreads fast."
+    )
+    assert bad == ["Warm", "Wry"]
+    assert _variants_with_banned_opener(
+        "Warm: A lot of people share this worry.\n"
+        "Factual: CORRECTIV rated it false.\n"
+        "Wry: Big claims travel fast."
+    ) == []
