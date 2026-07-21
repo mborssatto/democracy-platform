@@ -29,6 +29,10 @@ labels each line by where it came from:
 
 `merged_text` is rendered by one shared, deterministic function
 (`extract.render_merged_text`) — same channels in, same document out, always.
+To keep the document readable, speech segments (which ASR splits by pauses,
+not grammar) are merged until a sentence is complete, and speech and on-screen
+overlays interleave in time order — but a channel switch only happens once a
+sentence is over, never in the middle of one.
 
 ## The shapes: MediaPost in, ExtractionResult out
 
