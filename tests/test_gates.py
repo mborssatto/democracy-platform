@@ -63,3 +63,35 @@ def test_pseudonymization_is_keyed_and_stable():
     c = pseudo.pseudonymize("user_124")
     assert a == b != c
     assert a.startswith("anon_") and "user" not in a
+
+
+VARIANT_SEED = (
+    "Warm: Das Thema bewegt gerade viele Menschen im ganzen Land sehr stark.\n"
+    "Factual: Der Faktencheck von Correctiv kommt hier zu einem anderen Ergebnis.\n"
+    "Wry: Grosse Behauptungen reisen schneller als ihre Belege es je koennten."
+)
+
+
+def test_picking_a_tone_variant_is_not_an_edit():
+    """Choosing one of the seed's tone variants verbatim must read as 0%
+    changed — a selection, not a rework (hard rule 2)."""
+    picked = "Der Faktencheck von Correctiv kommt hier zu einem anderen Ergebnis."
+    assert gates.seed_edit_distance_pct(VARIANT_SEED, picked) == 0.0
+    ok, _, dist = gates.edit_gate(VARIANT_SEED, picked)
+    assert ok is False
+    assert dist == 0.0
+
+
+def test_reworked_tone_variant_can_pass():
+    """A genuine rework of one variant is measured against that variant."""
+    rework = ("Schau mal, Correctiv hat das geprueft und widerlegt - ich haenge "
+              "den Link an, lies ihn in Ruhe bevor du das weiter teilst bitte.")
+    ok, msg, dist = gates.edit_gate(VARIANT_SEED, rework)
+    assert dist >= 15.0
+    assert ok is True, msg
+
+
+def test_plain_seed_keeps_old_gate_behavior():
+    """Non-variant seeds (legacy drafts) still compare against the whole text."""
+    assert gates.seed_variants("just a plain single seed") == ["just a plain single seed"]
+    assert gates.seed_edit_distance_pct("one two three", "one two three") == 0.0

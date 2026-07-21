@@ -660,7 +660,7 @@ def update_draft(draft_id: int, body: DraftUpdate, user: dict = ANY_USER):
         raise HTTPException(404, "draft not found")
     _guard_responder_owns(con, user, d["opportunity_id"], draft_id)
 
-    dist = gates.token_edit_distance_pct(d["ai_seed"], body.text)
+    dist = gates.seed_edit_distance_pct(d["ai_seed"], body.text)
     con.execute("UPDATE drafts SET current_text=? WHERE id=?", (body.text, draft_id))
     con.execute("INSERT INTO draft_revisions (draft_id, text, actor, edit_distance_pct, created_at) "
                 "VALUES (?,?,?,?,?)", (draft_id, body.text, "human", dist, db.now()))

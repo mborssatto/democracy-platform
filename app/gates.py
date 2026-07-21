@@ -11,6 +11,29 @@ from . import config, llm
 
 # --- edit distance ------------------------------------------------------------
 
+# Reply seeds carry three tone variants ("Warm: …\nFactual: …\nWry: …"); the
+# editor's tone buttons let the human pick one. Gates measure against the
+# CLOSEST variant — picking a tone is a selection, not a rework (hard rule 2),
+# so an unedited variant reads as 0% changed, never as a 60% "edit".
+_VARIANT_RE = re.compile(r"^[ \t]*(warm|factual|wry)[ \t]*:[ \t]*", re.IGNORECASE | re.MULTILINE)
+
+
+def seed_variants(seed: str) -> list[str]:
+    """The seed's tone variants, or [seed] when it isn't in variant format."""
+    matches = list(_VARIANT_RE.finditer(seed))
+    if len(matches) < 2:
+        return [seed]
+    return [
+        seed[m.end():(matches[i + 1].start() if i + 1 < len(matches) else len(seed))].strip()
+        for i, m in enumerate(matches)
+    ]
+
+
+def seed_edit_distance_pct(seed: str, current: str) -> float:
+    """Edit distance against the closest seed variant (see _VARIANT_RE note)."""
+    return min(token_edit_distance_pct(v, current) for v in seed_variants(seed))
+
+
 def token_edit_distance_pct(seed: str, current: str) -> float:
     """Normalized word-level Levenshtein distance (0..100%).
 
@@ -68,10 +91,13 @@ def copypasta_check(text: str, recent_posted_texts: list[str],
 def edit_gate(seed: str, current: str, min_pct: float | None = None) -> tuple[bool, str, float]:
     if min_pct is None:
         min_pct = config.EDIT_GATE_MIN_PCT
-    dist = token_edit_distance_pct(seed, current)
+    # Compare against the closest tone variant, not the whole 3-variant seed —
+    # otherwise picking one variant alone would clear the gate as a "60% edit".
+    closest = min(seed_variants(seed), key=lambda v: token_edit_distance_pct(v, current))
+    dist = token_edit_distance_pct(closest, current)
     if dist < min_pct:
         return False, f"Only {dist}% changed (minimum {min_pct}%). Make it yours.", dist
-    verdict = llm.substantive_change(seed, current)
+    verdict = llm.substantive_change(closest, current)
     if not verdict["substantive"]:
         return False, verdict["reason"], dist
     return True, f"{dist}% changed; substantive rework confirmed.", dist

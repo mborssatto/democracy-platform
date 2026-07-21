@@ -13,7 +13,46 @@ const rq = useResponseQueue()
 const selectedId = ref<number | null>(null)
 const activeDraft = ref<ItemDraft | null>(null)
 const draftText = ref('')
+const activeTone = ref<string | null>(null)
 const gateResult = ref<Partial<GateResult>>({ checks: [] })
+
+// The seed carries three tone variants ("Warm: …\nFactual: …\nWry: …").
+// The editor starts with one and the tone buttons swap between them; the
+// backend gate measures the edit distance against the closest variant, so
+// picking a tone counts as 0% edited — the rework still has to be yours.
+const TONES = ['Warm', 'Factual', 'Wry']
+
+const variants = computed<Record<string, string> | null>(() => {
+  const seed = activeDraft.value?.ai_seed || ''
+  const ms = [...seed.matchAll(/^[ \t]*(Warm|Factual|Wry)[ \t]*:[ \t]*/gim)]
+  if (ms.length < 2) return null // legacy single-text seed — no buttons
+  const out: Record<string, string> = {}
+  ms.forEach((m, i) => {
+    const start = (m.index ?? 0) + m[0].length
+    const end = i + 1 < ms.length ? ms[i + 1].index : seed.length
+    const tone = m[1][0].toUpperCase() + m[1].slice(1).toLowerCase()
+    out[tone] = seed.slice(start, end).trim()
+  })
+  return out
+})
+
+function pickTone(tone: string) {
+  const text = variants.value?.[tone]
+  if (!text) return
+  activeTone.value = tone
+  draftText.value = text
+  debouncedCheck()
+}
+
+// "Create script for video response" — planned feature, popover only for now.
+const showVideoNote = ref(false)
+let videoNoteTimer: ReturnType<typeof setTimeout> | undefined
+function videoScriptSoon() {
+  showVideoNote.value = !showVideoNote.value
+  clearTimeout(videoNoteTimer)
+  if (showVideoNote.value) videoNoteTimer = setTimeout(() => (showVideoNote.value = false), 6000)
+}
+onUnmounted(() => clearTimeout(videoNoteTimer))
 const showPostedForm = ref(false)
 const postedUrl = ref('')
 const postedMsg = ref('')
@@ -51,9 +90,17 @@ async function openDraft(itemId: number) {
   await guard(async () => {
     const d = await api<ItemDraft>(`/items/${itemId}/draft`, { method: 'POST' })
     activeDraft.value = d
+    activeTone.value = null
     draftText.value = d.current_text
     gateResult.value = { checks: [], edit_distance_pct: 0, post_ready: false }
-    if (!d.created && d.current_text !== d.ai_seed) await saveDraft() // resume: show gate state
+    if (d.current_text === d.ai_seed && variants.value) {
+      pickTone('Warm') // untouched draft: start with ONE variant, not all three
+    } else if (!d.created && d.current_text !== d.ai_seed) {
+      // resume: restore gate state; highlight the tone the text came from, if any
+      const match = Object.entries(variants.value || {}).find(([, t]) => t === d.current_text)
+      activeTone.value = match ? match[0] : null
+      await saveDraft()
+    }
     rq.load() // refresh the rail's draft badges
   })
 }
@@ -174,7 +221,35 @@ async function markPosted() {
           <h3 style="margin:0 0 4px">✍️ Make it yours</h3>
           <p class="hint">The AI seed below is <b>raw material, not a message</b>. The Post-ready state unlocks only
             after you genuinely rework it — that's the human-in-the-loop gate, enforced in software.</p>
-          <div class="seed"><b>AI seed (immutable):</b><br>{{ activeDraft.ai_seed }}</div>
+          <details v-if="variants" class="seed">
+            <summary style="cursor:pointer"><b>AI seed (immutable) — all three tones</b></summary>
+            <div style="white-space:pre-wrap;margin-top:6px">{{ activeDraft.ai_seed }}</div>
+          </details>
+          <div v-else class="seed"><b>AI seed (immutable):</b><br>{{ activeDraft.ai_seed }}</div>
+          <div class="row" style="margin:10px 0 6px;gap:6px;align-items:center;flex-wrap:wrap;position:relative">
+            <template v-if="variants">
+              <span class="meta">Tone:</span>
+              <button
+                v-for="t in TONES" :key="t" v-show="variants[t]"
+                class="btn" :class="activeTone === t ? 'btn-blue' : 'btn-ghost'"
+                @click="pickTone(t)"
+              >{{ t }}</button>
+            </template>
+            <button
+              class="btn btn-ghost"
+              style="margin-left:auto;border-style:dashed;color:var(--muted, #667)"
+              @click="videoScriptSoon"
+            >🎥 Create script for video response</button>
+            <div
+              v-if="showVideoNote"
+              style="position:absolute;top:100%;right:0;z-index:5;margin-top:4px;max-width:320px;
+                     background:#fff7e6;border:1px solid #f0d9a8;border-radius:8px;
+                     padding:8px 10px;font-size:12.5px;box-shadow:0 4px 12px rgba(0,0,0,.08)"
+            >
+              🚧 <b>Feature in progress</b> — turning the reply into a short video script you can
+              record yourself isn't built yet. For now, work with the text reply.
+            </div>
+          </div>
           <textarea v-model="draftText" @input="debouncedCheck" />
           <div class="meter"><div :style="{ width: Math.min(100, gateResult.edit_distance_pct || 0) + '%' }" /></div>
           <p class="meta">Edit distance: {{ gateResult.edit_distance_pct || 0 }}% (need ≥{{ state.config ? state.config.edit_gate_min_pct : 15 }}% + substantive rework)</p>
