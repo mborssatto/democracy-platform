@@ -54,7 +54,7 @@ def process_job(con, job) -> dict | None:
             # Tradeoff: a crash mid-job leaves it 'running' (visible in the
             # queue UI) instead of auto-requeueing; run.py resets those at boot.
             con.commit()
-            media_ingest.process_url(con, payload["url"])
+            media_ingest.process_url(con, job["id"], payload["url"])
         elif job["kind"] == "outcome_snapshot":
             # M4.2: re-check a thread we replied in (+1h/+24h/+72h) — mocked
             # fetch, idempotent write; see app/outcomes.py.

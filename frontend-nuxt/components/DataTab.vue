@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // ⚙️ Data: URL ingestion, pipeline run + queue depth + dead-letter retry,
 // and the tipline form.
-import type { AnalyzedPost, PipelineLog, QueueStatus, UrlIngestResult } from '~/types/api'
+import type { AnalyzedPost, JobProgress, PipelineLog, QueueStatus, UrlIngestResult } from '~/types/api'
 
 const { api } = useApi()
 const { guard, refreshState } = useAppState()
@@ -52,6 +52,51 @@ async function retryJob(id: number) {
   })
 }
 
+// Per-URL progress: each queued URL is tracked by its job id and polled while
+// the worker acquires + analyzes it. Stage → fill percentage; a bar reaching
+// 100% means the post appears under "Analyzed posts" below.
+const tracked = ref<{ url: string; job_id: number; status: JobProgress['status']; stage: JobProgress['stage'] }[]>([])
+let jobTimer: ReturnType<typeof setInterval> | undefined
+onUnmounted(() => clearInterval(jobTimer))
+
+const STAGE_PCT: Record<string, number> = { downloading: 40, extracting: 75, saving: 92 }
+function jobPct(t: { status: string; stage: string | null }): number {
+  if (t.status === 'done') return 100
+  if (t.status === 'dead') return 100
+  if (t.status === 'running') return STAGE_PCT[t.stage || ''] ?? 25
+  return 8 // queued — waiting for the worker to pick it up
+}
+
+function jobLabel(t: { status: string; stage: string | null }): string {
+  if (t.status === 'done') return '✔ analyzed'
+  if (t.status === 'dead') return '✖ failed (see dead-letter below)'
+  if (t.status === 'running') return `${t.stage || 'starting'}…`
+  return 'queued…'
+}
+
+async function pollJobs() {
+  const active = tracked.value.filter(t => t.status !== 'done' && t.status !== 'dead')
+  if (!active.length) {
+    clearInterval(jobTimer)
+    jobTimer = undefined
+    return
+  }
+  try {
+    const res = await api<{ jobs: JobProgress[] }>(`/jobs?ids=${active.map(t => t.job_id).join(',')}`)
+    let finished = false
+    for (const j of res.jobs) {
+      const t = tracked.value.find(x => x.job_id === j.id)
+      if (!t) continue
+      if (j.status === 'done' && t.status !== 'done') finished = true
+      t.status = j.status
+      t.stage = j.stage
+    }
+    if (finished) loadAnalyzed() // a bar just hit 100% — show the new card
+  } catch {
+    /* silent, same rule as loadQueue */
+  }
+}
+
 async function submitUrls() {
   const urls = urlsInput.value.split(/[\n,]/).map(u => u.trim()).filter(Boolean)
   if (!urls.length) return
@@ -62,6 +107,11 @@ async function submitUrls() {
       body: JSON.stringify({ urls }),
     })
     urlsInput.value = ''
+    tracked.value = urlResults.value.results
+      .filter(r => r.status === 'queued' && r.job_id != null)
+      .map(r => ({ url: r.url, job_id: r.job_id!, status: 'queued' as const, stage: null }))
+    clearInterval(jobTimer)
+    if (tracked.value.length) jobTimer = setInterval(pollJobs, 2000)
     loadQueue()
   })
 }
@@ -125,8 +175,21 @@ async function runPipeline() {
           </label>
         </div>
         <div v-if="urlResults" style="margin-top:8px">
-          <div class="gate ok">✔ {{ urlResults.queued }} URL(s) queued — the worker downloads and
-            analyzes them in the background (watch the job queue below).</div>
+          <div v-for="t in tracked" :key="t.job_id" style="margin:8px 0">
+            <div class="row" style="justify-content:space-between;gap:10px">
+              <span class="meta" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">
+                🎬 {{ t.url.replace(/^https?:\/\/(www\.)?/, '') }}</span>
+              <span class="meta" :style="t.status === 'dead' ? 'color:var(--red,#c0392b)' : ''">
+                {{ jobLabel(t) }}</span>
+            </div>
+            <div class="meter" style="margin-top:3px">
+              <div :style="{
+                width: jobPct(t) + '%',
+                transition: 'width .8s ease',
+                background: t.status === 'dead' ? 'var(--red, #c0392b)' : undefined,
+              }" />
+            </div>
+          </div>
           <div v-for="r in urlResults.results.filter(x => x.status === 'invalid')" :key="r.url" class="gate fail">
             ✖ {{ r.url }} — {{ r.note }}
           </div>

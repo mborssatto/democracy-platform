@@ -175,6 +175,8 @@ CREATE TABLE IF NOT EXISTS jobs (
     kind text NOT NULL,                  -- enrich_item | outcome_snapshot
     payload text NOT NULL,               -- JSON, e.g. {"item_id": 7}
     status text DEFAULT 'queued',        -- queued | running | done | dead
+    stage text,                          -- sub-progress while running (acquire_url):
+                                          -- downloading | extracting | saving
     attempts integer DEFAULT 0,
     max_attempts integer DEFAULT 3,
     run_after text,                      -- ISO; claimable only when <= now (backoff)
@@ -182,6 +184,8 @@ CREATE TABLE IF NOT EXISTS jobs (
     created_at text,
     updated_at text
 );
+
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS stage text;
 
 CREATE TABLE IF NOT EXISTS media_extractions (
     -- Media content extraction results (docs/integrations/media-extraction.md):

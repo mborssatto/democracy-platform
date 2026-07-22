@@ -138,8 +138,16 @@ export interface ItemDraft {
 
 /** POST /api/ingest/urls — per-row outcome. */
 export interface UrlIngestResult {
-  results: { url: string; status: 'queued' | 'invalid'; note?: string }[]
+  results: { url: string; status: 'queued' | 'invalid'; note?: string; job_id?: number }[]
   queued: number
+}
+
+/** GET /api/jobs?ids=… — polled while acquire_url jobs run (progress bars). */
+export interface JobProgress {
+  id: number
+  status: 'queued' | 'running' | 'done' | 'dead'
+  stage: 'downloading' | 'extracting' | 'saving' | null
+  last_error: string | null
 }
 
 /** GET /api/opportunities — opportunities row joined with item + fact-check. */

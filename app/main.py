@@ -127,12 +127,17 @@ def ingest_urls(body: UrlsIn, user: dict = STAFF):
     try:
         results, queued = [], 0
         for url in body.urls:
-            url = url.strip()
+            # Add a scheme when the user pastes a bare domain (e.g. copied
+            # from an address bar that hides "https://") — otherwise an
+            # otherwise-valid URL fails validation with a confusing
+            # "no adapter" error. The normalized URL is what gets stored,
+            # enqueued, and shown back so the link stays clickable.
+            url = media_ingest.normalize_url(url)
             # Adapter registry dispatch (ADR 0001): any registered platform's
             # validator may claim the URL; today that's TikTok only.
             if media_ingest.platform_for(url):
-                queue.enqueue(con, "acquire_url", {"url": url})
-                results.append({"url": url, "status": "queued"})
+                job_id = queue.enqueue(con, "acquire_url", {"url": url})
+                results.append({"url": url, "status": "queued", "job_id": job_id})
                 queued += 1
             else:
                 results.append({"url": url, "status": "invalid",
@@ -277,6 +282,24 @@ def queue_status(user: dict = STAFF):
         "WHERE status='dead' ORDER BY updated_at DESC, id DESC LIMIT 20").fetchall()
     con.close()
     return {"depth": depth, "dead": [dict(r) for r in dead]}
+
+
+@app.get("/api/jobs")
+def jobs_status(ids: str, user: dict = STAFF):
+    """Status + progress `stage` for specific job ids — polled by the Data tab
+    to fill a per-URL progress bar while an acquire_url job runs. `ids` is a
+    comma-separated list (query param, not a path, to keep it a single GET)."""
+    job_ids = [int(i) for i in ids.split(",") if i.strip().isdigit()]
+    if not job_ids:
+        return {"jobs": []}
+    con = db.connect()
+    placeholders = ",".join(["?"] * len(job_ids))
+    rows = con.execute(
+        f"SELECT id, status, stage, last_error FROM jobs WHERE id IN ({placeholders})",
+        job_ids,
+    ).fetchall()
+    con.close()
+    return {"jobs": [dict(r) for r in rows]}
 
 
 @app.post("/api/queue/dead/{job_id}/retry")

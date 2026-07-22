@@ -22,6 +22,15 @@ _TIKTOK_POST_RE = re.compile(
 )
 
 
+def normalize_url(url: str) -> str:
+    """Add a scheme when the user pastes a bare domain (e.g. copied from an
+    address bar that hides "https://"). Without this, a scheme-less TikTok
+    URL fails `is_tiktok_post_url` with a confusing "no adapter" error even
+    though the URL is otherwise valid."""
+    url = url.strip()
+    return url if re.match(r"^https?://", url) else f"https://{url}"
+
+
 def is_tiktok_post_url(url: str) -> bool:
     return bool(_TIKTOK_POST_RE.match(url.strip()))
 
@@ -128,23 +137,31 @@ def load_extraction(con, item_id: int):
 
 
 # -------------------------------------------------------------------- job body
-def process_url(con, url: str) -> dict:
+def process_url(con, job_id: int, url: str) -> dict:
     """The 'acquire_url' job: acquire → extract → scrub → insert → persist.
     Raises on failure so the queue's backoff/dead-letter handling applies.
-    Caller (worker.process_job) commits."""
+    Caller (worker.process_job) commits.
+
+    Reports coarse progress via queue.set_stage (each call commits
+    immediately — see worker.py, the claim transaction is already released
+    by the time this runs) so the UI can render a fill-progress bar per URL
+    instead of a flat "queued" state for what can be a multi-minute job."""
     platform = platform_for(url)
     if platform is None:
         raise ValueError(f"no ingestion adapter claims URL: {url}")
     adapter = ADAPTERS[platform]
+    queue.set_stage(con, job_id, "downloading")
     extractor = extract.get_extractor()
     new_items = refreshed = 0
     for ingest_item, media_post in adapter["acquire"]([url], MEDIA_DIR):
+        queue.set_stage(con, job_id, "extracting")
         result = scrub_extraction(
             extractor.extract(media_post), ingest_item["real_author_id"])
         item = dict(ingest_item)
         # merged_text becomes the analyzed text; caption-only posts fall back
         # to their (scrubbed) caption so `text` is never empty (NOT NULL column).
         item["text"] = result.merged_text or scrub_author(item["text"], item["real_author_id"])
+        queue.set_stage(con, job_id, "saving")
         item_id = insert_content_item(con, item)
         if item_id is None:
             # Already ingested: this re-acquisition IS a fresh metrics

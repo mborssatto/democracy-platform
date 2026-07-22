@@ -287,3 +287,76 @@ def test_tiktok_url_validation(url, ok):
     assert media_ingest.is_tiktok_post_url(url) is ok
     # registry dispatch mirrors the validator (ADR 0001)
     assert media_ingest.platform_for(url) == ("tiktok" if ok else None)
+
+
+def test_normalize_url_adds_missing_scheme():
+    """A bare domain (address bar copies often omit https://) must still
+    resolve to the same adapter — this was the actual cause of a real user's
+    "no ingestion adapter" error on an otherwise-valid TikTok URL."""
+    bare = "www.tiktok.com/@samigujjar.699/video/7662390006866103560"
+    normalized = media_ingest.normalize_url(bare)
+    assert normalized == f"https://{bare}"
+    assert media_ingest.platform_for(normalized) == "tiktok"
+    # already-schemed URLs pass through untouched
+    assert media_ingest.normalize_url(VIDEO_URL) == VIDEO_URL
+
+
+def test_ingest_urls_accepts_scheme_less_url(client, monkeypatch):
+    """End-to-end: the /api/ingest/urls endpoint normalizes before validating,
+    so the exact URL shape from the bug report gets queued, not rejected."""
+    monkeypatch.setenv("APIFY_TOKEN", "apify_api_test")
+    r = client.post("/api/ingest/urls", json={
+        "urls": ["www.tiktok.com/@samigujjar.699/video/7662390006866103560"]})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["queued"] == 1
+    assert body["results"][0]["status"] == "queued"
+    assert body["results"][0]["url"].startswith("https://")
+    assert isinstance(body["results"][0]["job_id"], int)
+
+
+# ------------------------------------------------------------------- progress
+def test_acquire_url_job_reports_progress_stages(fresh_db, monkeypatch):
+    """The job's `stage` column advances through the acquisition pipeline so
+    the UI can render a filling progress bar instead of a flat "queued" state
+    for what can be a multi-minute job."""
+    monkeypatch.setenv("MEDIA_EXTRACTOR", "mock")
+    seen_stages = []
+    real_set_stage = queue.set_stage
+
+    def spy_set_stage(con, job_id, stage):
+        seen_stages.append(stage)
+        real_set_stage(con, job_id, stage)
+
+    monkeypatch.setattr(queue, "set_stage", spy_set_stage)
+    monkeypatch.setitem(media_ingest.ADAPTERS["tiktok"], "acquire",
+                        lambda urls, dest, client=None: [_fixture_pair()])
+    con = db.connect()
+    try:
+        pipeline.seed_reference_data(con)
+        job_id = queue.enqueue(con, "acquire_url", {"url": VIDEO_URL})
+        con.commit()
+        job = queue.claim_next(con)
+        worker.process_job(con, job)
+        assert seen_stages == ["downloading", "extracting", "saving"]
+        row = con.execute("SELECT status, stage FROM jobs WHERE id=?", (job_id,)).fetchone()
+        assert row["status"] == "done"
+    finally:
+        con.close()
+
+
+def test_jobs_status_endpoint(client):
+    """GET /api/jobs?ids=... is what the frontend polls for the progress bar."""
+    con = db.connect()
+    job_id = queue.enqueue(con, "acquire_url", {"url": VIDEO_URL})
+    con.commit(); con.close()
+
+    r = client.get(f"/api/jobs?ids={job_id}")
+    assert r.status_code == 200
+    jobs = r.json()["jobs"]
+    assert len(jobs) == 1
+    assert jobs[0]["id"] == job_id
+    assert jobs[0]["status"] == "queued"
+    assert jobs[0]["stage"] is None
+
+    assert client.get("/api/jobs?ids=").json()["jobs"] == []

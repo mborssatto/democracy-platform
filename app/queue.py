@@ -70,20 +70,30 @@ def complete(con, job_id: int) -> None:
     con.execute("UPDATE jobs SET status='done', updated_at=? WHERE id=?", (db.now(), job_id))
 
 
+def set_stage(con, job_id: int, stage: str) -> None:
+    """Record a running job's progress sub-stage (e.g. 'downloading' within
+    acquire_url) and commit immediately — called mid-job, after the claim
+    transaction has already been released (see worker.py's process_job),
+    so this is the only write in flight and safe to commit on its own.
+    Powers the UI's per-URL progress bar; purely informational otherwise."""
+    con.execute("UPDATE jobs SET stage=?, updated_at=? WHERE id=?", (stage, db.now(), job_id))
+    con.commit()
+
+
 def fail(con, job, error: str) -> None:
     """Record a failed attempt: re-queue with exponential backoff, or move to
     the dead-letter state after max_attempts. Caller commits."""
     attempts = job["attempts"] + 1
     if attempts >= job["max_attempts"]:
         con.execute(
-            "UPDATE jobs SET status='dead', attempts=?, last_error=?, updated_at=? WHERE id=?",
+            "UPDATE jobs SET status='dead', stage=NULL, attempts=?, last_error=?, updated_at=? WHERE id=?",
             (attempts, error, db.now(), job["id"]),
         )
     else:
         backoff = BACKOFF_BASE_SECONDS * (2 ** attempts)
         con.execute(
-            "UPDATE jobs SET status='queued', attempts=?, last_error=?, run_after=?, updated_at=? "
-            "WHERE id=?",
+            "UPDATE jobs SET status='queued', stage=NULL, attempts=?, last_error=?, run_after=?, "
+            "updated_at=? WHERE id=?",
             (attempts, error, iso_in(backoff), db.now(), job["id"]),
         )
 

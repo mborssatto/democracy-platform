@@ -211,6 +211,8 @@ CREATE TABLE IF NOT EXISTS jobs (
     kind TEXT NOT NULL,                  -- enrich_item | outcome_snapshot
     payload TEXT NOT NULL,               -- JSON, e.g. {"item_id": 7}
     status TEXT DEFAULT 'queued',        -- queued | running | done | dead
+    stage TEXT,                          -- sub-progress while running (acquire_url):
+                                          -- downloading | extracting | saving
     attempts INTEGER DEFAULT 0,
     max_attempts INTEGER DEFAULT 3,
     run_after TEXT,                      -- ISO; claimable only when <= now (backoff)
@@ -348,6 +350,11 @@ def init_db() -> None:
         # Column added 2026-07-21 (response queue: per-user drafts, no claiming)
         try:
             con.execute("ALTER TABLE drafts ADD COLUMN created_by TEXT")
+        except Exception:
+            pass  # column already there
+        # Column added 2026-07-22 (per-URL progress bar for acquire_url jobs)
+        try:
+            con.execute("ALTER TABLE jobs ADD COLUMN stage TEXT")
         except Exception:
             pass  # column already there
     con.commit()
