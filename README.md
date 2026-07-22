@@ -11,10 +11,9 @@ TikTok post acquisition, and a real Postgres (Supabase) database.
 
 ## Demo
 
-<!-- Demo video goes here (added by Mariana) — keep this section. -->
 *Demo video coming soon.*
 
-![Respond editor](docs/screenshots/4-respond-editor-tones.png)
+[Watch the demo](./Demo-democracy-prototype.mp4)
 
 ## Quickstart
 
