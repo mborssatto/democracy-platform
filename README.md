@@ -10,9 +10,6 @@ mocked with realistic fixture data; every mock has a step-by-step guide to make 
 TikTok post acquisition, and a real Postgres (Supabase) database.
 
 ## Demo
-
-*Demo video coming soon.*
-
 [Watch the demo](./Demo-democracy-prototype.mp4)
 
 ## Quickstart
